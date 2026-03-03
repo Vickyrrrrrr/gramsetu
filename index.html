@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GramSetu: AI for Rural India</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/theme/black.min.css">
+    <style>
+        .highlight { color: #42affa; }
+        .agent-box { border: 2px solid #42affa; padding: 20px; margin: 10px; border-radius: 10px; display: inline-block; width: 30%; vertical-align: top; background: rgba(255,255,255,0.1); }
+        .hidden-content { visibility: hidden; opacity: 0; transition: opacity 1s; }
+        .visible { visibility: visible; opacity: 1; }
+        .chat-bubble { background: #2ecc71; color: white; padding: 10px; border-radius: 15px; margin: 5px; text-align: left; width: 80%; }
+        .user-bubble { background: #555; margin-left: auto; }
+    </style>
+</head>
+<body>
+<div class="reveal">
+    <div class="slides">
+
+        <!-- SLIDE 1: TITLE -->
+        <section>
+            <h1 class="highlight">GramSetu</h1>
+            <h3>Bridging the Digital Divide with AI Agents</h3>
+            <p><small>Hack X VidYouth 2026 | Team [Your Name]</small></p>
+            <p style="font-size: 0.6em; color: gray;">(Press Spacebar to Navigate)</p>
+        </section>
+
+        <!-- SLIDE 2: THE PROBLEM -->
+        <section>
+            <h2>The Problem</h2>
+            <div style="display: flex; justify-content: space-around;">
+                <div style="width: 45%;">
+                    <ul>
+                        <li class="fragment">🇮🇳 <strong>600 Million+</strong> rural Indians</li>
+                        <li class="fragment">📉 Low digital literacy</li>
+                        <li class="fragment">🏛️ Complex government forms (Hindi/English barrier)</li>
+                        <li class="fragment">❌ High rejection rates due to errors</li>
+                    </ul>
+                </div>
+                <div style="width: 45%;" class="fragment">
+                    <img src="https://cdn-icons-png.flaticon.com/512/2921/2921226.png" width="200" alt="Confused User">
+                    <p><em>"How do I apply for a scholarship online?"</em></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 3: THE SOLUTION -->
+        <section>
+            <h2>The Solution: <span class="highlight">GramSetu</span></h2>
+            <p>An Autonomous Multi-Agent System</p>
+            
+            <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;">
+                <p class="fragment">🗣️ <strong>Voice/WhatsApp First:</strong> No app download needed.</p>
+                <p class="fragment">🤖 <strong>MCP Agents:</strong> Specialized AI workers collaborate.</p>
+                <p class="fragment">🛡️ <strong>Safety Layer:</strong> Human-in-the-loop verification.</p>
+            </div>
+        </section>
+
+        <!-- SLIDE 4: INTERACTIVE ARCHITECTURE -->
+        <section>
+            <h2>Under the Hood: MCP Architecture</h2>
+            <p><small>Click to reveal agents</small></p>
+            
+            <div style="display: flex; justify-content: center;">
+                <div class="agent-box fragment fade-up">
+                    <h4>📝 Form Agent</h4>
+                    <p style="font-size: 0.6em;">Fills JSON fields via API</p>
+                </div>
+                <div class="agent-box fragment fade-up">
+                    <h4>🔍 Validator Agent</h4>
+                    <p style="font-size: 0.6em;">Cross-checks DigiLocker docs</p>
+                </div>
+                <div class="agent-box fragment fade-up">
+                    <h4>🌐 Language Agent</h4>
+                    <p style="font-size: 0.6em;">Translates Hindi ↔ English</p>
+                </div>
+            </div>
+            
+            <div class="fragment" style="margin-top: 30px; border-top: 2px dashed white; padding-top: 20px;">
+                <strong>Orchestrator:</strong> Coordinates all agents via Model Context Protocol
+            </div>
+        </section>
+
+        <!-- SLIDE 5: SAFETY & LIABILITY -->
+        <section>
+            <h2>Addressing AI Risks</h2>
+            <table style="width: 100%; font-size: 0.8em;">
+                <tr>
+                    <th style="border-bottom: 1px solid white;">Risk</th>
+                    <th style="border-bottom: 1px solid white;">Our Mitigation</th>
+                </tr>
+                <tr class="fragment">
+                    <td>AI Hallucination</td>
+                    <td class="highlight">Confidence Scoring (Red/Yellow/Green)</td>
+                </tr>
+                <tr class="fragment">
+                    <td>Wrong Data Entry</td>
+                    <td class="highlight">Mandatory Human Review Step</td>
+                </tr>
+                <tr class="fragment">
+                    <td>Liability</td>
+                    <td class="highlight">Immutable Audit Logs</td>
+                </tr>
+            </table>
+        </section>
+
+        <!-- SLIDE 6: LIVE DEMO SIMULATION -->
+        <section>
+            <h2>Live Interaction Demo</h2>
+            <div style="text-align: left; background: black; padding: 20px; border-radius: 10px; border: 1px solid #333;">
+                <div class="chat-bubble user-bubble fragment">User: "Mera PAN card banwana hai."</div>
+                <div class="chat-bubble fragment">GramSetu: "Sure! Please speak your Aadhaar number."</div>
+                <div class="chat-bubble user-bubble fragment">User: "1234 5678 9012"</div>
+                <div class="chat-bubble fragment">GramSetu: "Fetching from DigiLocker... ✅ Verified. Filling Form...</div>
+                <div class="chat-bubble fragment" style="background: orange; color: black;">⚠️ Confidence Low on 'Father's Name'. Please confirm: 'Ramesh Kumar'?</div>
+            </div>
+        </section>
+
+        <!-- SLIDE 7: IMPACT -->
+        <section>
+            <h2>Projected Impact</h2>
+            <div style="display: flex; justify-content: space-around; text-align: center;">
+                <div class="fragment">
+                    <h1 class="highlight">80%</h1>
+                    <p>Faster Processing</p>
+                </div>
+                <div class="fragment">
+                    <h1 class="highlight">0</h1>
+                    <p>Language Barrier</p>
+                </div>
+                <div class="fragment">
+                    <h1 class="highlight">100%</h1>
+                    <p>Audit Transparency</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- SLIDE 8: END -->
+        <section>
+            <h2>Thank You</h2>
+            <p>Questions?</p>
+            <p><small>Built with Claude Opus 4.6 & MCP</small></p>
+        </section>
+
+    </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.js"></script>
+<script>
+    Reveal.initialize({ controls: true, progress: true, history: true, center: true });
+</script>
+</body>
+</html>
