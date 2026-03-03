@@ -1,0 +1,22 @@
+{
+    "name": "gramsetu",
+    "version": "1.0.0",
+    "description": "GramSetu - Python-first multi-agent system for government form automation",
+    "main": "whatsapp_bot/main.py",
+    "scripts": {
+        "start": "python -m whatsapp_bot.main",
+        "dashboard": "streamlit run dashboard/app.py",
+        "test": "python -m pytest tests/test_gramsetu.py -v"
+    },
+    "keywords": [
+        "gramsetu",
+        "government",
+        "forms",
+        "multi-agent",
+        "mcp",
+        "whatsapp",
+        "india"
+    ],
+    "author": "GramSetu Team",
+    "license": "MIT"
+}

@@ -1,0 +1,73 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cream:  #F7F6F3;
+  --ink:    #0C0C0C;
+  --muted:  #6B6B6B;
+  --border: #E5E5E0;
+  --tan:    #E8D9C0;
+}
+
+html {
+  background: var(--cream);
+  color: var(--ink);
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--cream);
+  min-height: 100vh;
+}
+
+/* -- Scroll */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* -- Thin selection */
+::selection { background: var(--tan); color: var(--ink); }
+
+/* -- Utilities */
+.serif { font-family: 'Instrument Serif', Georgia, serif; }
+.ink { color: var(--ink); }
+.muted { color: var(--muted); }
+
+/* -- Card */
+.card {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* -- Message bubble helpers */
+.msg-user {
+  background: var(--ink);
+  color: white;
+  border-radius: 18px 18px 4px 18px;
+}
+.msg-ai {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 18px 18px 18px 4px;
+}
+
+/* -- Smooth fade-in for bubbles */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up { animation: fadeUp 0.25s ease both; }
+
+/* -- Typing dots */
+@keyframes dot {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40%            { transform: scale(1);   opacity: 1; }
+}
+.typing-dot { animation: dot 1.2s infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }

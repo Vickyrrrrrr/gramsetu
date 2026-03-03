@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>National Government Services Portal — Apply Online</title>
+  <style>
+    :root {
+      --gov-navy: #1a3a6e;
+      --gov-orange: #f26522;
+      --gov-light: #f5f7fa;
+      --gov-border: #d0d7e2;
+      --gov-green: #2e7d32;
+      --gov-red: #c62828;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a1a;
+      font-size: 14px;
+    }
+
+    /* ── Top bar ────────────────────────────────────── */
+    .top-bar {
+      background: var(--gov-navy);
+      color: #fff;
+      padding: 6px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+    .top-bar a { color: #c8d7f7; text-decoration: none; margin: 0 8px; }
+
+    /* ── Header ────────────────────────────────────── */
+    header {
+      background: #fff;
+      border-bottom: 3px solid var(--gov-orange);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .emblem { width: 64px; height: 64px; }
+    .header-title h1 { font-size: 20px; color: var(--gov-navy); font-weight: 700; }
+    .header-title p { font-size: 12px; color: #555; margin-top: 2px; }
+
+    /* ── Nav ────────────────────────────────────── */
+    nav {
+      background: var(--gov-navy);
+      display: flex;
+      padding: 0 24px;
+    }
+    nav a {
+      color: #c8d7f7;
+      padding: 10px 16px;
+      display: block;
+      font-size: 13px;
+      text-decoration: none;
+      border-right: 1px solid rgba(255,255,255,.1);
+    }
+    nav a:hover, nav a.active {
+      background: var(--gov-orange);
+      color: #fff;
+    }
+
+    /* ── Layout ────────────────────────────────────── */
+    .container {
+      max-width: 960px;
+      margin: 24px auto;
+      padding: 0 16px;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 20px;
+    }
+
+    /* ── Sidebar ────────────────────────────────────── */
+    .sidebar {
+      background: #fff;
+      border: 1px solid var(--gov-border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .sidebar-title {
+      background: var(--gov-navy);
+      color: #fff;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .sidebar a {
+      display: block;
+      padding: 9px 14px;
+      color: #1a3a6e;
+      text-decoration: none;
+      font-size: 13px;
+      border-bottom: 1px solid #eee;
+    }
+    .sidebar a:hover { background: var(--gov-light); }
+    .sidebar a.active {
+      background: #e8eef8;
+      font-weight: 600;
+      border-left: 3px solid var(--gov-orange);
+    }
+
+    /* ── Form panel ────────────────────────────────── */
+    .form-panel {
+      background: #fff;
+      border: 1px solid var(--gov-border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .form-header {
+      background: linear-gradient(90deg, var(--gov-navy) 0%, #274a8a 100%);
+      color: #fff;
+      padding: 16px 20px;
+    }
+    .form-header h2 { font-size: 17px; font-weight: 600; }
+    .form-header p { font-size: 12px; color: #a8c0e8; margin-top: 4px; }
+
+    /* Status breadcrumb */
+    .form-steps {
+      display: flex;
+      background: #f8f9fb;
+      border-bottom: 1px solid var(--gov-border);
+      padding: 0 20px;
+    }
+    .step {
+      padding: 10px 16px;
+      font-size: 12px;
+      color: #888;
+      border-bottom: 2px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .step.done { color: var(--gov-green); border-color: var(--gov-green); }
+    .step.active { color: var(--gov-navy); border-color: var(--gov-orange); font-weight: 600; }
+    .step-num {
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      background: #ddd;
+      color: #666;
+      font-size: 11px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700;
+    }
+    .step.active .step-num { background: var(--gov-orange); color: #fff; }
+    .step.done .step-num { background: var(--gov-green); color: #fff; }
+
+    /* Sections */
+    .section {
+      padding: 20px;
+      border-bottom: 1px solid var(--gov-border);
+    }
+    .section-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--gov-navy);
+      margin-bottom: 14px;
+      padding-bottom: 6px;
+      border-bottom: 1px dashed var(--gov-border);
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px 20px;
+    }
+    .field-grid.single { grid-template-columns: 1fr; }
+    .field-grid.triple { grid-template-columns: 1fr 1fr 1fr; }
+
+    .field-group label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 5px;
+    }
+    .field-group label .req { color: var(--gov-red); }
+
+    .field-group input,
+    .field-group select,
+    .field-group textarea {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #c8cfdb;
+      border-radius: 3px;
+      font-size: 13px;
+      color: #1a1a1a;
+      background: #fff;
+      transition: border-color .15s;
+    }
+    .field-group input:focus,
+    .field-group select:focus,
+    .field-group textarea:focus {
+      outline: none;
+      border-color: var(--gov-navy);
+      background: #f0f5ff;
+    }
+    .field-group input.filled {
+      background: #f0fff4;
+      border-color: #81c784;
+    }
+
+    .field-hint { font-size: 11px; color: #888; margin-top: 4px; }
+
+    /* Declaration */
+    .declaration {
+      padding: 16px 20px;
+      background: #fffbf0;
+      border: 1px solid #ffe082;
+      margin: 16px 20px;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #555;
+      line-height: 1.6;
+    }
+    .declaration label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+    .declaration input[type=checkbox] { margin-top: 2px; flex-shrink: 0; }
+
+    /* OTP section */
+    .otp-section {
+      padding: 20px;
+      background: #f0f5ff;
+      border: 1px solid #b3c5e8;
+      margin: 16px 20px;
+      border-radius: 4px;
+      display: none;
+    }
+    .otp-section.visible { display: block; }
+    .otp-section h4 { color: var(--gov-navy); margin-bottom: 8px; font-size: 14px; }
+    .otp-input {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+      align-items: center;
+    }
+    .otp-input input {
+      width: 160px;
+      padding: 10px;
+      border: 2px solid var(--gov-navy);
+      border-radius: 4px;
+      font-size: 20px;
+      letter-spacing: 6px;
+      text-align: center;
+    }
+    .otp-input button {
+      padding: 10px 20px;
+      background: var(--gov-green);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    /* Buttons */
+    .form-actions {
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #f8f9fb;
+      border-top: 1px solid var(--gov-border);
+    }
+    .btn {
+      padding: 10px 24px;
+      border-radius: 4px;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      font-weight: 600;
+      transition: opacity .15s;
+    }
+    .btn:hover { opacity: .9; }
+    .btn-primary { background: var(--gov-navy); color: #fff; }
+    .btn-secondary { background: #fff; color: var(--gov-navy); border: 1px solid var(--gov-navy); }
+    .btn-submit { background: var(--gov-green); color: #fff; font-size: 15px; padding: 12px 32px; }
+    .btn-otp { background: var(--gov-orange); color: #fff; }
+
+    /* Success overlay */
+    .success-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .success-overlay.visible { display: flex; }
+    .success-box {
+      background: #fff;
+      border-radius: 8px;
+      padding: 40px;
+      text-align: center;
+      max-width: 420px;
+    }
+    .success-icon { font-size: 60px; margin-bottom: 16px; }
+    .success-box h2 { color: var(--gov-green); font-size: 22px; margin-bottom: 8px; }
+    .success-box p { color: #555; line-height: 1.6; }
+    .ref-num { font-size: 20px; font-weight: 700; color: var(--gov-navy); letter-spacing: 2px; margin: 16px 0; }
+
+    /* Auto-fill indicator */
+    .autofill-badge {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 10px;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; }
+    ::-webkit-scrollbar-thumb { background: #aaa; border-radius: 3px; }
+
+    footer {
+      text-align: center;
+      padding: 16px;
+      font-size: 11px;
+      color: #888;
+    }
+
+    /* ── DigiLocker OAuth Modal ─────────────────── */
+    .dl-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.55); z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    .dl-overlay.visible { display: flex; }
+    .dl-modal {
+      background: #fff; border-radius: 10px; width: 380px;
+      max-width: 92vw; overflow: hidden;
+      box-shadow: 0 20px 60px rgba(0,0,0,.3);
+    }
+    .dl-header {
+      background: linear-gradient(135deg, #0b3d91 0%, #1565c0 100%);
+      padding: 20px 24px; text-align: center; color: #fff;
+    }
+    .dl-header h3 { font-size: 18px; margin-bottom: 4px; }
+    .dl-header p { font-size: 12px; color: #90caf9; }
+    .dl-body { padding: 24px; }
+    .dl-body label { display: block; font-size: 12px; font-weight: 600; color: #444; margin-bottom: 5px; }
+    .dl-body input {
+      width: 100%; padding: 10px 12px; border: 1px solid #c8cfdb;
+      border-radius: 4px; font-size: 14px; margin-bottom: 14px;
+    }
+    .dl-body input:focus { outline: none; border-color: #1565c0; background: #f0f5ff; }
+    .dl-btn {
+      width: 100%; padding: 12px; border: none; border-radius: 6px;
+      background: #0b3d91; color: #fff; font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: background .2s;
+    }
+    .dl-btn:hover { background: #1565c0; }
+    .dl-btn:disabled { opacity: .5; cursor: default; }
+    .dl-footer { text-align: center; padding: 12px; font-size: 11px; color: #888; border-top: 1px solid #eee; }
+
+    /* Toast */
+    .toast {
+      display: none; position: fixed; top: 20px; right: 20px; z-index: 300;
+      background: #2e7d32; color: #fff; padding: 14px 24px; border-radius: 8px;
+      font-size: 14px; box-shadow: 0 4px 20px rgba(0,0,0,.25);
+      animation: slideIn .3s ease;
+    }
+    .toast.visible { display: block; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<div class="top-bar">
+  <div>
+    <span>🇮🇳 Government of India</span>
+    <a href="#">Skip to Main Content</a>
+    <a href="#">Screen Reader Access</a>
+  </div>
+  <div>
+    Last Updated: 04-Mar-2026
+    <a href="#">A-</a> <a href="#">A</a> <a href="#">A+</a>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <!-- Emblem SVG placeholder -->
+  <svg class="emblem" viewBox="0 0 64 64" fill="none">
+    <circle cx="32" cy="32" r="30" fill="#1a3a6e" stroke="#f26522" stroke-width="2"/>
+    <text x="32" y="38" text-anchor="middle" fill="white" font-size="20" font-weight="bold">🦁</text>
+  </svg>
+  <div class="header-title">
+    <h1>National Government Services Portal</h1>
+    <p>राष्ट्रीय सरकारी सेवा पोर्टल &nbsp;|&nbsp; Government of India &nbsp;|&nbsp; Ministry of Electronics &amp; IT</p>
+  </div>
+</header>
+
+<!-- Nav -->
+<nav>
+  <a href="#" class="active">Home</a>
+  <a href="#">Apply Online</a>
+  <a href="#">Track Status</a>
+  <a href="#" onclick="showDigiLockerModal(); return false;" style="background:#1565c0; color:#fff; font-weight:600;">🔒 Login with DigiLocker</a>
+  <a href="#">Help &amp; Support</a>
+  <a href="#">हिंदी</a>
+</nav>
+
+<!-- Main container -->
+<div class="container">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-title">📋 Available Services</div>
+    <a href="#" class="active" data-form="ration_card">Ration Card (BPL/APL)</a>
+    <a href="#" data-form="pan_card">PAN Card</a>
+    <a href="#" data-form="voter_id">Voter ID (EPIC)</a>
+    <a href="#" data-form="pension">Old Age Pension</a>
+    <a href="#" data-form="ayushman">Ayushman Bharat</a>
+    <a href="#" data-form="pm_kisan">PM-KISAN</a>
+    <a href="#" data-form="mnrega">MNREGA Job Card</a>
+    <a href="#" data-form="birth_cert">Birth Certificate</a>
+    <a href="#" data-form="caste_cert">Caste Certificate</a>
+    <a href="#" data-form="jan_dhan">Jan Dhan Account</a>
+    <a href="#" data-form="kcc">Kisan Credit Card</a>
+  </aside>
+
+  <!-- Form panel -->
+  <main class="form-panel" id="form-panel">
+
+    <div class="form-header">
+      <h2 id="form-title">🍚 Ration Card Application (BPL/APL)</h2>
+      <p id="form-subtitle">Ministry of Consumer Affairs, Food &amp; Public Distribution &nbsp;|&nbsp; Form No. RC-01</p>
+    </div>
+
+    <div class="form-steps">
+      <div class="step done" id="step1"><span class="step-num">✓</span> DigiLocker Verified</div>
+      <div class="step active" id="step2"><span class="step-num">2</span> Fill Application</div>
+      <div class="step" id="step3"><span class="step-num">3</span> OTP Verification</div>
+      <div class="step" id="step4"><span class="step-num">4</span> Submit</div>
+    </div>
+
+    <!-- Personal Details -->
+    <div class="section">
+      <div class="section-title">👤 Personal Details <span class="autofill-badge">✓ Auto-filled from DigiLocker</span></div>
+      <div class="field-grid">
+        <div class="field-group">
+          <label>Full Name <span class="req">*</span></label>
+          <input type="text" id="full_name" name="full_name" placeholder="As per Aadhaar" class="filled" />
+        </div>
+        <div class="field-group">
+          <label>Date of Birth <span class="req">*</span></label>
+          <input type="date" id="dob" name="dob" class="filled" />
+        </div>
+        <div class="field-group">
+          <label>Gender <span class="req">*</span></label>
+          <select id="gender" name="gender" class="filled">
+            <option value="">Select</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Aadhaar Number <span class="req">*</span></label>
+          <input type="text" id="aadhaar" name="aadhaar" placeholder="XXXX-XXXX-XXXX" maxlength="14" class="filled" />
+          <div class="field-hint">Will be masked in records</div>
+        </div>
+        <div class="field-group">
+          <label>Mobile Number <span class="req">*</span></label>
+          <input type="tel" id="mobile" name="mobile" placeholder="+91 XXXXX XXXXX" class="filled" />
+        </div>
+        <div class="field-group">
+          <label>Email Address</label>
+          <input type="email" id="email" name="email" placeholder="Optional" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Address -->
+    <div class="section">
+      <div class="section-title">🏠 Address Details <span class="autofill-badge">✓ Auto-filled from Aadhaar</span></div>
+      <div class="field-grid single">
+        <div class="field-group">
+          <label>House No. / Door No. <span class="req">*</span></label>
+          <input type="text" id="house_no" name="house_no" placeholder="House/Door/Flat No." class="filled" />
+        </div>
+      </div>
+      <div class="field-grid" style="margin-top:14px">
+        <div class="field-group">
+          <label>Village / Town / Ward <span class="req">*</span></label>
+          <input type="text" id="village" name="village" class="filled" />
+        </div>
+        <div class="field-group">
+          <label>Post Office <span class="req">*</span></label>
+          <input type="text" id="post_office" name="post_office" class="filled" />
+        </div>
+        <div class="field-group">
+          <label>District <span class="req">*</span></label>
+          <input type="text" id="district" name="district" class="filled" />
+        </div>
+        <div class="field-group">
+          <label>State <span class="req">*</span></label>
+          <select id="state" name="state" class="filled">
+            <option value="">Select State</option>
+            <option>Uttar Pradesh</option><option>Bihar</option><option>Madhya Pradesh</option>
+            <option>Rajasthan</option><option>Maharashtra</option><option>West Bengal</option>
+            <option>Tamil Nadu</option><option>Karnataka</option><option>Gujarat</option>
+            <option>Andhra Pradesh</option><option>Telangana</option><option>Odisha</option>
+            <option>Assam</option><option>Jharkhand</option><option>Chhattisgarh</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>PIN Code <span class="req">*</span></label>
+          <input type="text" id="pin_code" name="pin_code" maxlength="6" class="filled" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Family / Scheme Specific -->
+    <div class="section" id="scheme-section">
+      <div class="section-title">👨‍👩‍👧 Family &amp; Scheme Details</div>
+      <div class="field-grid triple">
+        <div class="field-group">
+          <label>Family Members <span class="req">*</span></label>
+          <input type="number" id="family_members" name="family_members" min="1" max="20" placeholder="No. of members" />
+        </div>
+        <div class="field-group">
+          <label>Annual Income (₹) <span class="req">*</span></label>
+          <input type="number" id="annual_income" name="annual_income" placeholder="Annual household income" />
+        </div>
+        <div class="field-group">
+          <label>Category <span class="req">*</span></label>
+          <select id="category" name="category">
+            <option value="">Select</option>
+            <option value="BPL">BPL (Below Poverty Line)</option>
+            <option value="APL">APL (Above Poverty Line)</option>
+            <option value="AAY">Antyodaya (Poorest)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bank details (for schemes that need it) -->
+    <div class="section" id="bank-section">
+      <div class="section-title">🏦 Bank Account Details (for Direct Benefit Transfer)</div>
+      <div class="field-grid triple">
+        <div class="field-group">
+          <label>Account Number</label>
+          <input type="text" id="account_number" name="account_number" placeholder="Account number" />
+        </div>
+        <div class="field-group">
+          <label>IFSC Code</label>
+          <input type="text" id="ifsc" name="ifsc" placeholder="IFSC Code" maxlength="11" />
+        </div>
+        <div class="field-group">
+          <label>Bank Name</label>
+          <input type="text" id="bank_name" name="bank_name" placeholder="Bank name" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Declaration -->
+    <div class="declaration">
+      <label id="declaration-label">
+        <input type="checkbox" id="declaration" name="declaration" />
+        <span>
+          I hereby declare that all information furnished above is true and correct to the best of my knowledge.
+          I understand that providing false information is a punishable offence under the Indian Penal Code.
+          I consent to the use of my Aadhaar data for verification and KYC purposes as per the Aadhaar Act, 2016.
+        </span>
+      </label>
+    </div>
+
+    <!-- OTP Section (shown after Send OTP clicked) -->
+    <div class="otp-section" id="otp-section">
+      <h4>🔐 OTP Verification</h4>
+      <p>A 6-digit OTP has been sent to your registered mobile number <strong id="otp-phone-display"></strong>.</p>
+      <div class="otp-input">
+        <input type="text" id="otp_input" name="otp_input" maxlength="6" placeholder="• • • • • •" />
+        <button onclick="submitOTP()" id="verify-otp-btn">Verify &amp; Submit</button>
+      </div>
+      <p style="margin-top:10px; font-size:12px; color:#666">
+        OTP valid for 10 minutes. &nbsp;<a href="#" onclick="resendOTP(); return false;">Resend OTP</a>
+      </p>
+    </div>
+
+    <!-- Form actions -->
+    <div class="form-actions">
+      <button class="btn btn-secondary" onclick="resetForm()">↩ Reset</button>
+      <div style="display:flex; gap:12px">
+        <button class="btn btn-otp" id="send-otp-btn" onclick="sendOTP()">
+          📱 Send OTP &amp; Proceed
+        </button>
+        <button class="btn btn-submit" id="submit-btn" onclick="submitForm()" style="display:none">
+          ✅ Submit Application
+        </button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Success overlay -->
+<div class="success-overlay" id="success-overlay">
+  <div class="success-box">
+    <div class="success-icon">✅</div>
+    <h2>Application Submitted!</h2>
+    <p>Your application has been successfully submitted.</p>
+    <div class="ref-num" id="ref-number">REF-2026-XXXXXXXX</div>
+    <p style="font-size:13px; color:#666; margin-top:8px">
+      Keep this reference number for tracking.<br>
+      SMS confirmation will be sent to your mobile number.
+    </p>
+    <button class="btn btn-primary" style="margin-top:20px; width:100%" onclick="document.getElementById('success-overlay').classList.remove('visible')">
+      Close
+    </button>
+  </div>
+</div>
+
+<footer>
+  © 2026 National Government Services Portal | Ministry of Electronics &amp; IT, Government of India |
+  <a href="#">Privacy Policy</a> | <a href="#">Terms of Service</a> | <a href="#">Accessibility</a>
+</footer>
+
+<script>
+  // ── Playwright fills these fields programmatically ─────────────────────────
+  // IDs map 1:1 with GramSetu DigiLocker data keys
+
+  function markFilled(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('filled');
+  }
+
+  function setField(id, value) {
+    const el = document.getElementById(id);
+    if (!el || !value) return;
+    if (el.tagName === 'SELECT') {
+      const opts = el.options;
+      for (let i = 0; i < opts.length; i++) {
+        if (opts[i].value.toLowerCase() === String(value).toLowerCase() ||
+            opts[i].text.toLowerCase().includes(String(value).toLowerCase())) {
+          el.selectedIndex = i;
+          break;
+        }
+      }
+    } else {
+      el.value = value;
+    }
+    markFilled(id);
+  }
+
+  // Auto-fill from URL params (GramSetu Playwright will pass data this way)
+  function autoFillFromParams() {
+    const params = new URLSearchParams(window.location.search);
+    const fieldMap = {
+      full_name: ['full_name', 'name', 'applicant_name'],
+      dob: ['date_of_birth', 'dob'],
+      gender: ['gender'],
+      aadhaar: ['aadhaar_number', 'aadhaar'],
+      mobile: ['mobile_number', 'mobile', 'phone'],
+      email: ['email'],
+      house_no: ['house_number', 'house_no', 'door_no'],
+      village: ['village', 'town', 'ward'],
+      post_office: ['post_office'],
+      district: ['district'],
+      state: ['state'],
+      pin_code: ['pin_code', 'pincode', 'postal_code'],
+      family_members: ['family_members', 'family_size'],
+      annual_income: ['annual_income', 'income'],
+      category: ['category'],
+      account_number: ['account_number', 'bank_account'],
+      ifsc: ['ifsc_code', 'ifsc'],
+      bank_name: ['bank_name'],
+    };
+
+    for (const [fieldId, paramKeys] of Object.entries(fieldMap)) {
+      for (const key of paramKeys) {
+        const val = params.get(key);
+        if (val) { setField(fieldId, val); break; }
+      }
+    }
+
+    const formType = params.get('form_type') || 'ration_card';
+    updateFormTitle(formType);
+  }
+
+  const FORM_META = {
+    ration_card:  { title: '🍚 Ration Card Application (BPL/APL)', sub: 'Ministry of Consumer Affairs | Form RC-01' },
+    pan_card:     { title: '📇 PAN Card Application', sub: 'Income Tax Department | Form 49A' },
+    voter_id:     { title: '🗳️ Voter ID (EPIC) Application', sub: 'Election Commission of India | Form 6' },
+    pension:      { title: '👴 Old Age Pension Application', sub: 'Ministry of Social Justice | IGNOAPS' },
+    ayushman:     { title: '🏥 Ayushman Bharat Application', sub: 'NHA | PM-JAY | Health ID' },
+    pm_kisan:     { title: '🌾 PM-KISAN Registration', sub: 'Ministry of Agriculture | PM-KISAN Nidhi' },
+    mnrega:       { title: '👷 MNREGA Job Card Application', sub: 'Ministry of Rural Development | Form MR-1' },
+    birth_cert:   { title: '👶 Birth Certificate Application', sub: 'Civil Registration System | Form 1' },
+    caste_cert:   { title: '📜 Caste Certificate Application', sub: 'State Government | SC/ST/OBC' },
+    jan_dhan:     { title: '🏦 Jan Dhan Account Opening', sub: 'Ministry of Finance | PMJDY' },
+    kcc:          { title: '💳 Kisan Credit Card Application', sub: 'NABARD / Banks | KCC Scheme' },
+  };
+
+  function updateFormTitle(formType) {
+    const meta = FORM_META[formType] || FORM_META.ration_card;
+    document.getElementById('form-title').textContent = meta.title;
+    document.getElementById('form-subtitle').textContent = meta.sub;
+  }
+
+  function sendOTP() {
+    const decl = document.getElementById('declaration');
+    if (!decl.checked) {
+      alert('Please accept the declaration to proceed.');
+      decl.focus();
+      return;
+    }
+    const mobile = document.getElementById('mobile').value;
+    if (!mobile) {
+      alert('Mobile number is required for OTP.');
+      return;
+    }
+
+    document.getElementById('otp-phone-display').textContent =
+      '+91 XXXXXX' + mobile.slice(-4);
+    document.getElementById('otp-section').classList.add('visible');
+    document.getElementById('send-otp-btn').style.display = 'none';
+    document.getElementById('submit-btn').style.display = 'block';
+
+    // Scroll to OTP
+    document.getElementById('otp-section').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function resendOTP() {
+    const btn = document.querySelector('.otp-input button');
+    btn.textContent = 'Sending...';
+    setTimeout(() => { btn.textContent = 'Verify & Submit'; }, 1500);
+  }
+
+  function submitOTP() {
+    const otp = document.getElementById('otp_input').value;
+    if (otp.length !== 6) {
+      alert('Please enter the 6-digit OTP.');
+      return;
+    }
+    completeSubmit();
+  }
+
+  function submitForm() {
+    const otp = document.getElementById('otp_input').value;
+    if (!otp || otp.length < 6) {
+      document.getElementById('otp_input').focus();
+      return;
+    }
+    completeSubmit();
+  }
+
+  function completeSubmit() {
+    const ref = 'REF-' + new Date().getFullYear() + '-' +
+      Math.random().toString(36).toUpperCase().slice(2, 10);
+    document.getElementById('ref-number').textContent = ref;
+    document.getElementById('success-overlay').classList.add('visible');
+
+    // Update steps
+    document.getElementById('step2').className = 'step done';
+    document.getElementById('step2').querySelector('.step-num').textContent = '✓';
+    document.getElementById('step3').className = 'step done';
+    document.getElementById('step3').querySelector('.step-num').textContent = '✓';
+    document.getElementById('step4').className = 'step active';
+    document.getElementById('step4').querySelector('.step-num').textContent = '4';
+  }
+
+  function resetForm() {
+    document.querySelectorAll('input, select, textarea').forEach(el => {
+      if (el.type !== 'checkbox') el.value = '';
+      else el.checked = false;
+      el.classList.remove('filled');
+    });
+    document.getElementById('otp-section').classList.remove('visible');
+    document.getElementById('send-otp-btn').style.display = 'block';
+    document.getElementById('submit-btn').style.display = 'none';
+  }
+
+  // Sidebar navigation
+  document.querySelectorAll('.sidebar a[data-form]').forEach(a => {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      document.querySelectorAll('.sidebar a').forEach(x => x.classList.remove('active'));
+      this.classList.add('active');
+      updateFormTitle(this.dataset.form);
+      resetForm();
+    });
+  });
+
+  // Run on load
+  autoFillFromParams();
+</script>
+
+<!-- DigiLocker OAuth Modal -->
+<div class="dl-overlay" id="dl-overlay">
+  <div class="dl-modal">
+    <div class="dl-header">
+      <h3>🔒 DigiLocker</h3>
+      <p>Government of India — Digital Document Wallet</p>
+    </div>
+    <div class="dl-body">
+      <label>Aadhaar Number</label>
+      <input type="text" id="dl-aadhaar" maxlength="14" placeholder="XXXX XXXX XXXX"
+             oninput="this.value=this.value.replace(/[^0-9 ]/g,'')"/>
+      <label>OTP (sent to linked mobile)</label>
+      <input type="text" id="dl-otp" maxlength="6" placeholder="6-digit OTP"
+             oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
+      <button class="dl-btn" id="dl-submit-btn" onclick="submitDigiLocker()">
+        Verify &amp; Connect DigiLocker
+      </button>
+    </div>
+    <div class="dl-footer">
+      Secured by DigiLocker API v4.0 &nbsp;|&nbsp; <a href="#" onclick="closeDigiLocker(); return false;">Cancel</a>
+    </div>
+  </div>
+</div>
+
+<!-- Toast notification -->
+<div class="toast" id="dl-toast">✅ DigiLocker Connected — fetching documents...</div>
+
+<script>
+  function showDigiLockerModal() {
+    document.getElementById('dl-overlay').classList.add('visible');
+    document.getElementById('dl-aadhaar').focus();
+  }
+  function closeDigiLocker() {
+    document.getElementById('dl-overlay').classList.remove('visible');
+  }
+  function submitDigiLocker() {
+    var aadhaar = document.getElementById('dl-aadhaar').value.replace(/\s/g, '');
+    var otp = document.getElementById('dl-otp').value;
+    if (aadhaar.length < 12) { alert('Enter 12-digit Aadhaar number'); return; }
+    if (otp.length < 6) { alert('Enter 6-digit OTP'); return; }
+    var btn = document.getElementById('dl-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Verifying...';
+    setTimeout(function() {
+      closeDigiLocker();
+      btn.disabled = false;
+      btn.textContent = 'Verify & Connect DigiLocker';
+      var toast = document.getElementById('dl-toast');
+      toast.classList.add('visible');
+      // Update step 1 to show connected
+      var step1 = document.getElementById('step1');
+      step1.className = 'step done';
+      step1.querySelector('.step-num').textContent = '✓';
+      setTimeout(function() {
+        toast.classList.remove('visible');
+        autoFillFromParams();
+      }, 1500);
+    }, 1200);
+  }
+</script>
+</body>
+</html>

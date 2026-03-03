@@ -1,0 +1,31 @@
+node_modules/
+.env
+*.db
+*.sqlite
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+gramsetu-data.json
+gramsetu.db
+tmpchk.db
+
+# Next.js build cache
+.next/
+out/
+
+# Python virtual environment
+.venv/
+venv/
+env/
+
+# Runtime-generated data
+data/screenshots/
+data/voice_cache/
+data/*.db
+
+# Pytest cache
+.pytest_cache/
+
+# TypeScript build info
+*.tsbuildinfo
