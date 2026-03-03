@@ -2,152 +2,309 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>GramSetu: AI for Rural India</title>
+    <title>GramSetu | Premium Deck</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/theme/black.min.css">
     <style>
-        .highlight { color: #42affa; }
-        .agent-box { border: 2px solid #42affa; padding: 20px; margin: 10px; border-radius: 10px; display: inline-block; width: 30%; vertical-align: top; background: rgba(255,255,255,0.1); }
-        .hidden-content { visibility: hidden; opacity: 0; transition: opacity 1s; }
-        .visible { visibility: visible; opacity: 1; }
-        .chat-bubble { background: #2ecc71; color: white; padding: 10px; border-radius: 15px; margin: 5px; text-align: left; width: 80%; }
-        .user-bubble { background: #555; margin-left: auto; }
+        /* Premium Typography */
+        body {
+            font-family: 'Inter', 'Segoe UI', sans-serif;
+        }
+        
+        /* Minimalist Theme */
+        .reveal {
+            --main-color: #00ffff;
+            --accent-color: #ff6b6b;
+            --bg-dark: #0a0a0f;
+            --card-bg: rgba(30, 30, 46, 0.6);
+        }
+        
+        .reveal .slides section {
+            background: var(--bg-dark);
+            padding: 40px;
+        }
+        
+        /* Accent Colors */
+        .highlight {
+            color: var(--main-color);
+            text-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        }
+        
+        .subtle-accent {
+            color: var(--accent-color);
+        }
+        
+        /* Minimal Cards */
+        .card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.05);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 255, 255, 0.1);
+        }
+        
+        /* Smooth Animations */
+        .fade-in {
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+        }
+        
+        .fragment.visible .fade-in {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        /* Minimal Icons */
+        .icon-list li {
+            margin: 15px 0;
+            display: flex;
+            align-items: center;
+        }
+        
+        .icon-list span {
+            display: inline-block;
+            margin-right: 12px;
+            font-size: 1.2em;
+        }
+        
+        /* Chat Simulation */
+        .chat-container {
+            max-width: 80%;
+            margin: 20px auto;
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 15px;
+        }
+        
+        .message {
+            padding: 10px 15px;
+            margin: 8px 0;
+            border-radius: 18px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        
+        .user-message {
+            background: rgba(86, 86, 108, 0.5);
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+        
+        .bot-message {
+            background: rgba(0, 255, 255, 0.1);
+            border-bottom-left-radius: 4px;
+        }
+        
+        /* Stats Counter */
+        .stat-number {
+            font-size: 2.5em;
+            font-weight: 700;
+            color: var(--main-color);
+        }
+        
+        /* Custom Progress Bar */
+        .reveal .progress {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .reveal .progress span {
+            background: var(--main-color);
+            box-shadow: 0 0 10px rgba(0, 255, 255, 0.5);
+        }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
 </head>
 <body>
-<div class="reveal">
-    <div class="slides">
-
-        <!-- SLIDE 1: TITLE -->
-        <section>
-            <h1 class="highlight">GramSetu</h1>
-            <h3>Bridging the Digital Divide with AI Agents</h3>
-            <p><small>Hack X VidYouth 2026 | Team [Your Name]</small></p>
-            <p style="font-size: 0.6em; color: gray;">(Press Spacebar to Navigate)</p>
-        </section>
-
-        <!-- SLIDE 2: THE PROBLEM -->
-        <section>
-            <h2>The Problem</h2>
-            <div style="display: flex; justify-content: space-around;">
-                <div style="width: 45%;">
-                    <ul>
-                        <li class="fragment">🇮🇳 <strong>600 Million+</strong> rural Indians</li>
-                        <li class="fragment">📉 Low digital literacy</li>
-                        <li class="fragment">🏛️ Complex government forms (Hindi/English barrier)</li>
-                        <li class="fragment">❌ High rejection rates due to errors</li>
-                    </ul>
-                </div>
-                <div style="width: 45%;" class="fragment">
-                    <img src="https://cdn-icons-png.flaticon.com/512/2921/2921226.png" width="200" alt="Confused User">
-                    <p><em>"How do I apply for a scholarship online?"</em></p>
-                </div>
-            </div>
-        </section>
-
-        <!-- SLIDE 3: THE SOLUTION -->
-        <section>
-            <h2>The Solution: <span class="highlight">GramSetu</span></h2>
-            <p>An Autonomous Multi-Agent System</p>
+    <div class="reveal">
+        <div class="slides">
             
-            <div style="background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px;">
-                <p class="fragment">🗣️ <strong>Voice/WhatsApp First:</strong> No app download needed.</p>
-                <p class="fragment">🤖 <strong>MCP Agents:</strong> Specialized AI workers collaborate.</p>
-                <p class="fragment">🛡️ <strong>Safety Layer:</strong> Human-in-the-loop verification.</p>
-            </div>
-        </section>
-
-        <!-- SLIDE 4: INTERACTIVE ARCHITECTURE -->
-        <section>
-            <h2>Under the Hood: MCP Architecture</h2>
-            <p><small>Click to reveal agents</small></p>
-            
-            <div style="display: flex; justify-content: center;">
-                <div class="agent-box fragment fade-up">
-                    <h4>📝 Form Agent</h4>
-                    <p style="font-size: 0.6em;">Fills JSON fields via API</p>
+            <!-- SLIDE 1: Premium Title -->
+            <section data-auto-animate>
+                <div class="card" style="text-align: center; margin-top: 15%;">
+                    <h1 class="highlight" style="font-size: 3.5em; letter-spacing: 3px;">GRAMSETU</h1>
+                    <h3 class="fade-in" style="opacity: 0.8; margin-top: 20px;">Bridging the Digital Divide</h3>
+                    <p class="fade-in" style="opacity: 0.6; margin-top: 10px;">Autonomous AI for Rural India</p>
+                    <div class="fade-in" style="margin-top: 30px; font-size: 0.8em; opacity: 0.7;">
+                        Hack X VidYouth 2026 | Theme: Open Innovation
+                    </div>
                 </div>
-                <div class="agent-box fragment fade-up">
-                    <h4>🔍 Validator Agent</h4>
-                    <p style="font-size: 0.6em;">Cross-checks DigiLocker docs</p>
-                </div>
-                <div class="agent-box fragment fade-up">
-                    <h4>🌐 Language Agent</h4>
-                    <p style="font-size: 0.6em;">Translates Hindi ↔ English</p>
-                </div>
-            </div>
-            
-            <div class="fragment" style="margin-top: 30px; border-top: 2px dashed white; padding-top: 20px;">
-                <strong>Orchestrator:</strong> Coordinates all agents via Model Context Protocol
-            </div>
-        </section>
+            </section>
 
-        <!-- SLIDE 5: SAFETY & LIABILITY -->
-        <section>
-            <h2>Addressing AI Risks</h2>
-            <table style="width: 100%; font-size: 0.8em;">
-                <tr>
-                    <th style="border-bottom: 1px solid white;">Risk</th>
-                    <th style="border-bottom: 1px solid white;">Our Mitigation</th>
-                </tr>
-                <tr class="fragment">
-                    <td>AI Hallucination</td>
-                    <td class="highlight">Confidence Scoring (Red/Yellow/Green)</td>
-                </tr>
-                <tr class="fragment">
-                    <td>Wrong Data Entry</td>
-                    <td class="highlight">Mandatory Human Review Step</td>
-                </tr>
-                <tr class="fragment">
-                    <td>Liability</td>
-                    <td class="highlight">Immutable Audit Logs</td>
-                </tr>
-            </table>
-        </section>
-
-        <!-- SLIDE 6: LIVE DEMO SIMULATION -->
-        <section>
-            <h2>Live Interaction Demo</h2>
-            <div style="text-align: left; background: black; padding: 20px; border-radius: 10px; border: 1px solid #333;">
-                <div class="chat-bubble user-bubble fragment">User: "Mera PAN card banwana hai."</div>
-                <div class="chat-bubble fragment">GramSetu: "Sure! Please speak your Aadhaar number."</div>
-                <div class="chat-bubble user-bubble fragment">User: "1234 5678 9012"</div>
-                <div class="chat-bubble fragment">GramSetu: "Fetching from DigiLocker... ✅ Verified. Filling Form...</div>
-                <div class="chat-bubble fragment" style="background: orange; color: black;">⚠️ Confidence Low on 'Father's Name'. Please confirm: 'Ramesh Kumar'?</div>
-            </div>
-        </section>
-
-        <!-- SLIDE 7: IMPACT -->
-        <section>
-            <h2>Projected Impact</h2>
-            <div style="display: flex; justify-content: space-around; text-align: center;">
-                <div class="fragment">
-                    <h1 class="highlight">80%</h1>
-                    <p>Faster Processing</p>
+            <!-- SLIDE 2: The Problem -->
+            <section data-auto-animate>
+                <h2 class="highlight" style="margin-bottom: 40px;">The Challenge</h2>
+                <div class="icon-list">
+                    <li class="fragment fade-in">
+                        <span>🌐</span>
+                        <strong>600 Million+</strong> Rural Citizens
+                    </li>
+                    <li class="fragment fade-in">
+                        <span>❌</span>
+                        Digital Literacy Gap
+                    </li>
+                    <li class="fragment fade-in">
+                        <span>🏛️</span>
+                        Complex English/Hindi Forms
+                    </li>
+                    <li class="fragment fade-in">
+                        <span>⚠️</span>
+                        High Rejection Rates
+                    </li>
                 </div>
-                <div class="fragment">
-                    <h1 class="highlight">0</h1>
-                    <p>Language Barrier</p>
-                </div>
-                <div class="fragment">
-                    <h1 class="highlight">100%</h1>
-                    <p>Audit Transparency</p>
-                </div>
-            </div>
-        </section>
+            </section>
 
-        <!-- SLIDE 8: END -->
-        <section>
-            <h2>Thank You</h2>
-            <p>Questions?</p>
-            <p><small>Built with Claude Opus 4.6 & MCP</small></p>
-        </section>
+            <!-- SLIDE 3: The Solution -->
+            <section data-auto-animate>
+                <h2 class="highlight" style="margin-bottom: 40px;">The Solution</h2>
+                <div class="card fragment fade-in">
+                    <h4>VOICE-FIRST ACCESS</h4>
+                    <p>No app download required. Works on WhatsApp/IVR</p>
+                </div>
+                <div class="card fragment fade-in">
+                    <h4>AGENT-DRIVEN AUTOMATION</h4>
+                    <p>Specialized AI agents collaborate via MCP</p>
+                </div>
+                <div class="card fragment fade-in">
+                    <h4>HUMAN-IN-THE-LOOP</h4>
+                    <p>Never bypasses user verification</p>
+                </div>
+            </section>
 
+            <!-- SLIDE 4: Architecture -->
+            <section data-auto-animate>
+                <h2 class="highlight" style="margin-bottom: 40px;">MCP Architecture</h2>
+                
+                <div style="display: flex; justify-content: space-around; flex-wrap: wrap;">
+                    <div class="card fragment fade-in" style="width: 28%;">
+                        <h4>Orchestrator</h4>
+                        <p>Coordinates all agents</p>
+                    </div>
+                    <div class="card fragment fade-in" style="width: 28%;">
+                        <h4>Form Agent</h4>
+                        <p>Fills JSON fields</p>
+                    </div>
+                    <div class="card fragment fade-in" style="width: 28%;">
+                        <h4>Validator</h4>
+                        <p>Cross-checks DigiLocker</p>
+                    </div>
+                </div>
+                
+                <div class="card fragment fade-in" style="margin-top: 25px;">
+                    <h4>Safety Agent</h4>
+                    <p>Calculates confidence scores</p>
+                </div>
+            </section>
+
+            <!-- SLIDE 5: Safety -->
+            <section data-auto-animate>
+                <h2 class="highlight" style="margin-bottom: 40px;">Addressing AI Risks</h2>
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    <tr class="fragment fade-in">
+                        <td style="padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">AI Hallucination</td>
+                        <td class="highlight" style="padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">Confidence Scoring</td>
+                    </tr>
+                    <tr class="fragment fade-in">
+                        <td style="padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">Wrong Data Entry</td>
+                        <td class="highlight" style="padding: 15px; border-bottom: 1px solid rgba(255,255,255,0.1);">Mandatory Review</td>
+                    </tr>
+                    <tr class="fragment fade-in">
+                        <td style="padding: 15px;">Legal Liability</td>
+                        <td class="highlight" style="padding: 15px;">Audit Logs</td>
+                    </tr>
+                </table>
+            </section>
+
+            <!-- SLIDE 6: Demo -->
+            <section data-auto-animate>
+                <h2 class="highlight" style="margin-bottom: 40px;">Live Interaction</h2>
+                <div class="chat-container">
+                    <div class="message user-message fragment fade-in">
+                        "Mera PAN card banwana hai."
+                    </div>
+                    <div class="message bot-message fragment fade-in">
+                        "Sure! Please provide your Aadhaar number..."
+                    </div>
+                    <div class="message user-message fragment fade-in">
+                        "1234 5678 9012"
+                    </div>
+                    <div class="message bot-message fragment fade-in">
+                        "✅ Verified. Filling form..."
+                    </div>
+                    <div class="message bot-message subtle-accent fragment fade-in">
+                        "⚠️ Low confidence on Father's name. Confirm: 'Ramesh Kumar'?"
+                    </div>
+                </div>
+            </section>
+
+            <!-- SLIDE 7: Impact -->
+            <section data-auto-animate>
+                <h2 class="highlight" style="margin-bottom: 40px;">Project Impact</h2>
+                <div style="display: flex; justify-content: space-around; flex-wrap: wrap;">
+                    <div class="fragment fade-in" style="text-align: center; padding: 20px;">
+                        <div class="stat-number">80%</div>
+                        <p>Faster Processing</p>
+                    </div>
+                    <div class="fragment fade-in" style="text-align: center; padding: 20px;">
+                        <div class="stat-number">8+</div>
+                        <p>Languages</p>
+                    </div>
+                    <div class="fragment fade-in" style="text-align: center; padding: 20px;">
+                        <div class="stat-number">100M</div>
+                        <p>Potential Users</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- SLIDE 8: Roadmap -->
+            <section data-auto-animate>
+                <h2 class="highlight" style="margin-bottom: 40px;">Roadmap</h2>
+                <div class="card fragment fade-in">
+                    <h4>Phase 1: Identity (Current)</h4>
+                    <p>PAN, Aadhaar, DL applications</p>
+                </div>
+                <div class="card fragment fade-in">
+                    <h4>Phase 2: Education</h4>
+                    <p>Scholarship applications</p>
+                </div>
+                <div class="card fragment fade-in">
+                    <h4>Phase 3: Integration</h4>
+                    <p>Full UMANG platform</p>
+                </div>
+            </section>
+
+            <!-- SLIDE 9: Thank You -->
+            <section data-auto-animate>
+                <div class="card" style="text-align: center; margin-top: 20%;">
+                    <h2 class="highlight">Thank You</h2>
+                    <p style="margin-top: 20px;">Questions?</p>
+                    <div style="margin-top: 30px; font-size: 0.7em; opacity: 0.7;">
+                        Built with Claude Opus 4.6 & MCP
+                    </div>
+                </div>
+            </section>
+
+        </div>
     </div>
-</div>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.js"></script>
-<script>
-    Reveal.initialize({ controls: true, progress: true, history: true, center: true });
-</script>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/reveal.js/4.5.0/reveal.min.js"></script>
+    <script>
+        Reveal.initialize({
+            controls: true,
+            progress: true,
+            center: false,
+            hash: true,
+            transition: 'fade',
+            backgroundTransition: 'fade',
+            slideNumber: true
+        });
+    </script>
 </body>
 </html>
