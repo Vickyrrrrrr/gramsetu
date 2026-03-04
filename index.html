@@ -262,11 +262,20 @@
             box-shadow: 0 8px 32px rgba(139, 92, 246, .15);
         }
 
-        .intro-name {
+        .intro-team {
             font-family: 'Instrument Serif', Georgia, serif;
-            font-size: 48px;
+            font-size: 56px;
             font-weight: 400;
             font-style: italic;
+            margin-bottom: 2px;
+            color: var(--ink);
+        }
+
+        .intro-name {
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 20px;
+            font-weight: 500;
+            color: var(--muted);
             margin-bottom: 6px;
         }
 
@@ -657,8 +666,12 @@
                 grid-template-columns: 1fr;
             }
 
+            .intro-team {
+                font-size: 42px;
+            }
+
             .intro-name {
-                font-size: 36px;
+                font-size: 18px;
             }
 
             .s-title {
@@ -675,6 +688,7 @@
         <!-- ═══ SLIDE 1: INTRO ═══════════════════════════════════ -->
         <div class="slide active" data-i="0">
             <div class="intro-avatar anim">🌾</div>
+            <div class="intro-team anim">Hacksphere ⚡ Squad</div>
             <div class="intro-name anim">Vicky Nishad</div>
             <div class="intro-handle anim">
                 <a href="https://github.com/Vickyrrrrrr" target="_blank">@Vickyrrrrrr</a>
@@ -682,7 +696,8 @@
             </div>
             <p class="intro-desc anim">
                 Building <strong>GramSetu</strong> — an autonomous AI agent that fills government forms
-                for 650M+ rural Indians via WhatsApp. Zero typing, zero complexity.
+                for 650M+ rural Indians via WhatsApp and reaches the masses via our WebApp. Zero typing, zero
+                complexity.
             </p>
             <div class="intro-tags anim">
                 <span class="intro-tag">NVIDIA NIM</span>
@@ -724,16 +739,21 @@
         <!-- ═══ SLIDE 3: THE SOLUTION ════════════════════════════ -->
         <div class="slide" data-i="2">
             <div class="s-label anim">The Solution</div>
-            <h2 class="s-title anim">Say it on WhatsApp.<br>GramSetu does the rest.</h2>
+            <h2 class="s-title anim">Say it on WhatsApp or Web.<br>GramSetu does the rest.</h2>
             <p class="s-sub anim">
-                User says "राशन कार्ड चाहिए" on WhatsApp → GramSetu pulls data from DigiLocker,
+                User says "राशन कार्ड चाहिए" on WhatsApp or WebApp → GramSetu pulls data from DigiLocker,
                 fills the government portal using Playwright, and submits — all in under 60 seconds.
             </p>
-            <div class="grid-3 anim">
+            <div class="grid-4 anim">
                 <div class="card" style="text-align:center">
                     <div class="card-icon">📱</div>
-                    <h3>WhatsApp Native</h3>
+                    <h3>WhatsApp for Rural</h3>
                     <p>Works on any ₹2000 phone. No app install, no literacy needed.</p>
+                </div>
+                <div class="card" style="text-align:center">
+                    <div class="card-icon">🌐</div>
+                    <h3>WebApp for Masses</h3>
+                    <p>Accessible via any browser to quickly serve millions of users.</p>
                 </div>
                 <div class="card" style="text-align:center">
                     <div class="card-icon">🗣️</div>
@@ -844,7 +864,7 @@
         <div class="slide" data-i="5">
             <div class="s-label anim">Coverage</div>
             <h2 class="s-title anim">11 Government Schemes</h2>
-            <p class="s-sub anim">From welfare to banking — one WhatsApp message to apply for any of these</p>
+            <p class="s-sub anim">From welfare to banking — just use our WebApp or send a WhatsApp message to apply</p>
             <div class="grid-4 anim" style="font-size:13px;">
                 <div class="card" style="padding:16px;text-align:center">
                     <div style="font-size:24px;margin-bottom:6px">🏠</div><b>Ration Card</b>
@@ -926,8 +946,9 @@
             <div class="grid-3 anim">
                 <div class="card" style="text-align:center">
                     <div class="card-icon">🔐</div>
-                    <h3>Zero PII on WhatsApp</h3>
-                    <p>Users never type Aadhaar/PAN. DigiLocker OAuth fetches it directly — encrypted in transit.</p>
+                    <h3>Zero PII on Chat</h3>
+                    <p>Users never type Aadhaar/PAN on chat. DigiLocker OAuth fetches it directly — encrypted in
+                        transit.</p>
                 </div>
                 <div class="card" style="text-align:center">
                     <div class="card-icon">🛡️</div>

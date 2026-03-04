@@ -1033,7 +1033,11 @@ async def process_message(
     4. Resume WAIT_OTP -> submit OTP and complete
     """
     if not session_id:
-        session_id = str(uuid.uuid4())
+        # Use user_phone as the stable thread_id so the LangGraph checkpoint
+        # (WAIT_CONFIRM, WAIT_OTP, etc.) persists across requests and server restarts.
+        # A random UUID was previously used here, which caused the "YES shows
+        # welcome menu" bug because each request got a fresh session with no state.
+        session_id = user_phone if user_phone else user_id
 
     async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
         compiled = build_graph().compile(checkpointer=checkpointer)

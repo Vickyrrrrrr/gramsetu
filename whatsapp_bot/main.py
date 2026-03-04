@@ -112,6 +112,21 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
+# ── ngrok browser-warning bypass ─────────────────────────────
+# Twilio's servers don't send a browser User-Agent, so ngrok's free-tier
+# serves them a browser challenge page instead of forwarding the request.
+# Adding this header to all responses tells ngrok's edge to skip the challenge.
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+
+class NgrokBypassMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        response = await call_next(request)
+        response.headers["ngrok-skip-browser-warning"] = "true"
+        return response
+
+app.add_middleware(NgrokBypassMiddleware)
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
