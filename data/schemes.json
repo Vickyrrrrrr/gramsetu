@@ -1,0 +1,112 @@
+[
+    {
+        "id": "pm-kisan",
+        "name": "PM-KISAN Samman Nidhi",
+        "name_hi": "पीएम-किसान सम्मान निधि",
+        "description": "Direct income support of ₹6,000/year to farmer families",
+        "description_hi": "किसान परिवारों को ₹6,000/वर्ष की प्रत्यक्ष आय सहायता",
+        "category": "agriculture",
+        "eligibility": {
+            "occupation": [
+                "farmer"
+            ],
+            "min_land_acres": 0,
+            "max_income": 200000,
+            "states": "all"
+        },
+        "required_documents": [
+            "aadhaar",
+            "bank_account",
+            "land_record"
+        ],
+        "benefit": "₹6,000 per year in 3 installments"
+    },
+    {
+        "id": "ayushman-bharat",
+        "name": "Ayushman Bharat - PMJAY",
+        "name_hi": "आयुष्मान भारत - पीएमजेएवाई",
+        "description": "Health insurance cover of ₹5 lakh per family per year",
+        "description_hi": "प्रति परिवार प्रति वर्ष ₹5 लाख का स्वास्थ्य बीमा कवर",
+        "category": "health",
+        "eligibility": {
+            "occupation": [
+                "any"
+            ],
+            "max_income": 300000,
+            "states": "all"
+        },
+        "required_documents": [
+            "aadhaar",
+            "income_certificate",
+            "ration_card"
+        ],
+        "benefit": "₹5,00,000 health cover per year"
+    },
+    {
+        "id": "ujjwala-yojana",
+        "name": "Pradhan Mantri Ujjwala Yojana",
+        "name_hi": "प्रधानमंत्री उज्ज्वला योजना",
+        "description": "Free LPG connections to women from BPL households",
+        "description_hi": "बीपीएल परिवारों की महिलाओं को मुफ्त एलपीजी कनेक्शन",
+        "category": "social_welfare",
+        "eligibility": {
+            "occupation": [
+                "any"
+            ],
+            "max_income": 150000,
+            "states": "all",
+            "gender": "female"
+        },
+        "required_documents": [
+            "aadhaar",
+            "bpl_card",
+            "bank_account"
+        ],
+        "benefit": "Free LPG connection + first refill"
+    },
+    {
+        "id": "pmay-gramin",
+        "name": "Pradhan Mantri Awaas Yojana - Gramin",
+        "name_hi": "प्रधानमंत्री आवास योजना - ग्रामीण",
+        "description": "Financial assistance for construction of pucca house",
+        "description_hi": "पक्के मकान के निर्माण के लिए वित्तीय सहायता",
+        "category": "housing",
+        "eligibility": {
+            "occupation": [
+                "any"
+            ],
+            "max_income": 180000,
+            "area": "rural",
+            "states": "all"
+        },
+        "required_documents": [
+            "aadhaar",
+            "income_certificate",
+            "land_record",
+            "bank_account"
+        ],
+        "benefit": "₹1,20,000 - ₹1,30,000 for house construction"
+    },
+    {
+        "id": "sukanya-samriddhi",
+        "name": "Sukanya Samriddhi Yojana",
+        "name_hi": "सुकन्या समृद्धि योजना",
+        "description": "Savings scheme for girl child with high interest rate",
+        "description_hi": "उच्च ब्याज दर के साथ बालिका के लिए बचत योजना",
+        "category": "savings",
+        "eligibility": {
+            "occupation": [
+                "any"
+            ],
+            "has_daughter": true,
+            "daughter_age_max": 10,
+            "states": "all"
+        },
+        "required_documents": [
+            "aadhaar",
+            "birth_certificate",
+            "bank_account"
+        ],
+        "benefit": "8.2% interest rate, tax free"
+    }
+]
