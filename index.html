@@ -4,558 +4,1053 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GramSetu — Bridging Rural India to Government Services</title>
-    <meta name="description"
-        content="GramSetu uses AI-powered multi-agent system to help rural Indians fill government forms automatically via WhatsApp in Hindi and English.">
+    <title>GramSetu — Presentation</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap"
         rel="stylesheet">
     <style>
         :root {
-            --bg: #0a0e1a;
-            --bg2: #111827;
-            --card: #1a1f35;
-            --border: #2a3152;
-            --text: #e8ecf5;
-            --text2: #8892b0;
+            --cream: #F7F6F3;
+            --ink: #0C0C0C;
+            --muted: #6B6B6B;
+            --border: #E5E5E0;
+            --tan: #E8D9C0;
+            --tan2: #D4C4A8;
+            --accent: #8b5cf6;
+            --accent2: #3b82f6;
             --green: #10b981;
-            --blue: #3b82f6;
-            --violet: #8b5cf6;
-            --amber: #f59e0b;
-            --gradient: linear-gradient(135deg, #8b5cf6, #3b82f6, #10b981);
+            --warm: #a67c52;
         }
 
-        * {
+        *,
+        *::before,
+        *::after {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
 
+        html {
+            overflow: hidden;
+            background: var(--cream);
+        }
+
         body {
             font-family: 'Inter', system-ui, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            overflow-x: hidden;
+            background: var(--cream);
+            color: var(--ink);
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+            -webkit-font-smoothing: antialiased;
         }
 
-        /* ---- Animated Background ---- */
-        .bg-glow {
-            position: fixed;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle at 30% 30%, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
-                radial-gradient(circle at 70% 70%, rgba(59, 130, 246, 0.06) 0%, transparent 50%),
-                radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.04) 0%, transparent 50%);
-            animation: bgFloat 20s ease-in-out infinite;
-            pointer-events: none;
-            z-index: 0;
+        ::selection {
+            background: var(--tan);
+            color: var(--ink);
         }
 
-        @keyframes bgFloat {
-
-            0%,
-            100% {
-                transform: translate(0, 0);
-            }
-
-            50% {
-                transform: translate(-3%, -3%);
-            }
+        .serif {
+            font-family: 'Instrument Serif', Georgia, serif;
         }
 
-        /* ---- Nav ---- */
-        nav {
-            position: fixed;
-            top: 0;
-            width: 100%;
-            padding: 18px 40px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            z-index: 100;
-            background: rgba(10, 14, 26, 0.8);
-            backdrop-filter: blur(16px);
-            border-bottom: 1px solid rgba(42, 49, 82, 0.5);
-        }
-
-        .nav-brand {
-            font-size: 24px;
-            font-weight: 800;
-            background: var(--gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 24px;
-            align-items: center;
-        }
-
-        .nav-links a {
-            color: var(--text2);
-            text-decoration: none;
-            font-size: 14px;
-            font-weight: 500;
-            transition: color 0.2s;
-        }
-
-        .nav-links a:hover {
-            color: var(--text);
-        }
-
-        .nav-cta {
-            background: var(--gradient) !important;
-            -webkit-background-clip: unset !important;
-            -webkit-text-fill-color: unset !important;
-            color: #fff !important;
-            padding: 8px 20px;
-            border-radius: 8px;
-            font-weight: 600;
-        }
-
-        /* ---- Hero ---- */
-        .hero {
+        /* ─── SLIDE ENGINE ──────────────────────────────────── */
+        .deck {
             position: relative;
-            z-index: 1;
-            min-height: 100vh;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        .slide {
+            position: absolute;
+            inset: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            text-align: center;
-            padding: 120px 24px 80px;
+            padding: 60px 80px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity .55s cubic-bezier(.4, 0, .2, 1), transform .55s cubic-bezier(.4, 0, .2, 1);
+            transform: translateY(40px) scale(.97);
         }
 
-        .hero-badge {
-            background: rgba(139, 92, 246, 0.12);
-            border: 1px solid rgba(139, 92, 246, 0.25);
-            color: #a78bfa;
-            padding: 6px 18px;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: 600;
-            margin-bottom: 28px;
-            display: inline-flex;
+        .slide.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0) scale(1);
+        }
+
+        .slide.exit-up {
+            transform: translateY(-40px) scale(.97);
+            opacity: 0;
+        }
+
+        .slide.exit-down {
+            transform: translateY(40px) scale(.97);
+            opacity: 0;
+        }
+
+        /* Subtle grain texture */
+        .slide::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            opacity: .03;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+        }
+
+        /* ─── NAVIGATION CONTROLS ───────────────────────────── */
+        .nav-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 200;
+            display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: space-between;
+            padding: 16px 40px;
+            background: rgba(247, 246, 243, .85);
+            backdrop-filter: blur(12px);
+            border-top: 1px solid var(--border);
         }
 
-        .hero h1 {
-            font-size: clamp(36px, 6vw, 64px);
-            font-weight: 800;
+        .slide-counter {
+            font-size: 13px;
+            color: var(--muted);
+            font-weight: 600;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .slide-counter b {
+            color: var(--ink);
+        }
+
+        .progress-track {
+            flex: 1;
+            margin: 0 24px;
+            height: 3px;
+            background: var(--border);
+            border-radius: 99px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            border-radius: 99px;
+            background: linear-gradient(90deg, var(--accent), var(--accent2), var(--green));
+            transition: width .4s cubic-bezier(.4, 0, .2, 1);
+        }
+
+        .nav-btns {
+            display: flex;
+            gap: 6px;
+        }
+
+        .nav-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 16px;
+            color: var(--ink);
+            transition: all .2s;
+        }
+
+        .nav-btn:hover {
+            border-color: var(--ink);
+            background: var(--ink);
+            color: white;
+        }
+
+        .nav-btn:disabled {
+            opacity: .3;
+            cursor: default;
+        }
+
+        .nav-btn:disabled:hover {
+            border-color: var(--border);
+            background: white;
+            color: var(--ink);
+        }
+
+        /* ─── SLIDE TYPOGRAPHY ──────────────────────────────── */
+        .s-label {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: .14em;
+            text-transform: uppercase;
+            color: var(--warm);
+            margin-bottom: 14px;
+        }
+
+        .s-title {
+            font-family: 'Instrument Serif', Georgia, serif;
+            font-size: clamp(36px, 5.5vw, 64px);
+            font-weight: 400;
+            font-style: italic;
             line-height: 1.1;
-            margin-bottom: 20px;
-            max-width: 800px;
+            text-align: center;
+            margin-bottom: 16px;
+            max-width: 750px;
         }
 
-        .hero h1 .highlight {
-            background: var(--gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .hero p {
-            font-size: 18px;
-            color: var(--text2);
-            max-width: 600px;
-            line-height: 1.6;
+        .s-sub {
+            font-size: 16px;
+            color: var(--muted);
+            text-align: center;
+            max-width: 540px;
+            line-height: 1.7;
             margin-bottom: 40px;
         }
 
-        .hero-buttons {
+        /* child animations */
+        .slide .anim {
+            opacity: 0;
+            transform: translateY(18px);
+            transition: opacity .45s, transform .45s;
+        }
+
+        .slide.active .anim {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .slide.active .anim:nth-child(1) {
+            transition-delay: .05s;
+        }
+
+        .slide.active .anim:nth-child(2) {
+            transition-delay: .12s;
+        }
+
+        .slide.active .anim:nth-child(3) {
+            transition-delay: .20s;
+        }
+
+        .slide.active .anim:nth-child(4) {
+            transition-delay: .28s;
+        }
+
+        .slide.active .anim:nth-child(5) {
+            transition-delay: .36s;
+        }
+
+        .slide.active .anim:nth-child(6) {
+            transition-delay: .44s;
+        }
+
+        /* ─── SLIDE 1: INTRO ────────────────────────────────── */
+        .intro-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
             display: flex;
-            gap: 14px;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(139, 92, 246, .15);
+        }
+
+        .intro-name {
+            font-family: 'Instrument Serif', Georgia, serif;
+            font-size: 48px;
+            font-weight: 400;
+            font-style: italic;
+            margin-bottom: 6px;
+        }
+
+        .intro-handle {
+            font-size: 14px;
+            color: var(--muted);
+            margin-bottom: 28px;
+        }
+
+        .intro-handle a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .intro-handle a:hover {
+            text-decoration: underline;
+        }
+
+        .intro-desc {
+            font-size: 17px;
+            color: var(--muted);
+            text-align: center;
+            max-width: 480px;
+            line-height: 1.7;
+            margin-bottom: 36px;
+        }
+
+        .intro-tags {
+            display: flex;
+            gap: 8px;
             flex-wrap: wrap;
             justify-content: center;
         }
 
-        .btn {
-            padding: 14px 28px;
+        .intro-tag {
+            padding: 5px 14px;
+            border-radius: 99px;
+            font-size: 12px;
+            font-weight: 600;
+            background: white;
+            border: 1px solid var(--border);
+            color: var(--muted);
+        }
+
+        /* ─── CARDS USED ACROSS SLIDES ───────────────────────── */
+        .card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            transition: all .3s;
+        }
+
+        .card:hover {
+            box-shadow: 0 8px 32px rgba(0, 0, 0, .06);
+            transform: translateY(-3px);
+            border-color: var(--tan2);
+        }
+
+        .card-icon {
+            font-size: 32px;
+            margin-bottom: 14px;
+            display: block;
+        }
+
+        .card h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .card p {
+            font-size: 13px;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .card-tag {
+            display: inline-block;
+            margin-top: 10px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .1em;
+            text-transform: uppercase;
+            padding: 3px 10px;
+            border-radius: 99px;
+            background: rgba(139, 92, 246, .08);
+            color: var(--accent);
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            max-width: 700px;
+            width: 100%;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+            max-width: 850px;
+            width: 100%;
+        }
+
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            max-width: 860px;
+            width: 100%;
+        }
+
+        /* ─── PIPELINE STEPS (SLIDE 4) ──────────────────────── */
+        .pipe {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            max-width: 620px;
+            width: 100%;
+        }
+
+        .pipe-row {
+            display: flex;
+            gap: 0;
+            align-items: stretch;
+        }
+
+        .pipe-spine {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 44px;
+            flex-shrink: 0;
+        }
+
+        .pipe-dot {
+            width: 36px;
+            height: 36px;
             border-radius: 10px;
+            background: white;
+            border: 2px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
             font-size: 15px;
+            font-weight: 700;
+            flex-shrink: 0;
+            z-index: 1;
+            transition: all .3s;
+        }
+
+        .pipe-row:hover .pipe-dot {
+            border-color: var(--accent);
+            background: rgba(139, 92, 246, .06);
+        }
+
+        .pipe-wire {
+            flex: 1;
+            width: 2px;
+            background: var(--border);
+        }
+
+        .pipe-row:last-child .pipe-wire {
+            display: none;
+        }
+
+        .pipe-body {
+            padding: 8px 16px 22px;
+        }
+
+        .pipe-body h4 {
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 3px;
+        }
+
+        .pipe-body p {
+            font-size: 12px;
+            color: var(--muted);
+            line-height: 1.55;
+        }
+
+        /* ─── STATS ROW ─────────────────────────────────────── */
+        .stats-row {
+            display: flex;
+            gap: 40px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .stat-box {
+            text-align: center;
+        }
+
+        .stat-num {
+            font-family: 'Instrument Serif', Georgia, serif;
+            font-size: 48px;
+            font-weight: 400;
+            font-style: italic;
+            color: var(--ink);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--muted);
+            margin-top: 2px;
+            font-weight: 500;
+        }
+
+        /* ─── TECH PILLS (SLIDE 7) ──────────────────────────── */
+        .tech-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            max-width: 680px;
+        }
+
+        .tech-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            transition: all .25s;
+        }
+
+        .tech-pill:hover {
+            border-color: var(--tan2);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, .05);
+            transform: translateY(-2px);
+        }
+
+        .tech-pill .tp-icon {
+            font-size: 18px;
+        }
+
+        .tech-pill small {
+            font-size: 11px;
+            color: var(--muted);
+            font-weight: 400;
+        }
+
+        /* ─── QUOTE BOX (SLIDE 9) ───────────────────────────── */
+        .quote-box {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 36px 40px;
+            max-width: 600px;
+            text-align: center;
+            position: relative;
+        }
+
+        .quote-box::before {
+            content: '"';
+            position: absolute;
+            top: 16px;
+            left: 24px;
+            font-family: 'Instrument Serif', Georgia, serif;
+            font-size: 60px;
+            color: var(--tan);
+            line-height: 1;
+        }
+
+        .quote-box p {
+            font-size: 17px;
+            line-height: 1.7;
+            font-style: italic;
+            color: var(--ink);
+        }
+
+        .quote-box cite {
+            display: block;
+            margin-top: 14px;
+            font-size: 13px;
+            color: var(--muted);
+            font-style: normal;
+        }
+
+        /* ─── CTA SLIDE ─────────────────────────────────────── */
+        .cta-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 52px 48px;
+            text-align: center;
+            max-width: 580px;
+            box-shadow: 0 16px 64px rgba(0, 0, 0, .05);
+        }
+
+        .cta-card .s-title {
+            margin-bottom: 14px;
+        }
+
+        .cta-card p {
+            font-size: 15px;
+            color: var(--muted);
+            line-height: 1.7;
+            margin-bottom: 32px;
+        }
+
+        .cta-btns {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 28px;
+            border-radius: 10px;
+            font-size: 14px;
             font-weight: 600;
             font-family: inherit;
             text-decoration: none;
             display: inline-flex;
             align-items: center;
             gap: 8px;
-            transition: all 0.3s;
             cursor: pointer;
             border: none;
+            transition: all .25s;
         }
 
-        .btn-primary {
-            background: var(--gradient);
-            color: #fff;
-            box-shadow: 0 4px 24px rgba(139, 92, 246, 0.3);
+        .btn-dark {
+            background: var(--ink);
+            color: white;
         }
 
-        .btn-primary:hover {
+        .btn-dark:hover {
+            background: #333;
             transform: translateY(-2px);
-            box-shadow: 0 8px 32px rgba(139, 92, 246, 0.4);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
         }
 
-        .btn-secondary {
-            background: var(--card);
-            color: var(--text);
+        .btn-ghost {
+            background: transparent;
+            color: var(--ink);
             border: 1px solid var(--border);
         }
 
-        .btn-secondary:hover {
-            border-color: var(--violet);
+        .btn-ghost:hover {
+            border-color: var(--ink);
             transform: translateY(-2px);
         }
 
-        /* ---- Architecture ---- */
-        .section {
-            position: relative;
-            z-index: 1;
-            padding: 80px 24px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .section-title {
-            text-align: center;
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 12px;
-        }
-
-        .section-sub {
-            text-align: center;
-            color: var(--text2);
-            font-size: 16px;
-            margin-bottom: 48px;
-        }
-
-        /* ---- Agent Cards ---- */
-        .agents-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-        }
-
-        .agent-card {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 28px;
-            transition: all 0.3s;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .agent-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 3px;
-            background: var(--gradient);
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-
-        .agent-card:hover {
-            border-color: var(--violet);
-            transform: translateY(-4px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
-        }
-
-        .agent-card:hover::before {
-            opacity: 1;
-        }
-
-        .agent-icon {
-            font-size: 36px;
-            margin-bottom: 16px;
-            display: block;
-        }
-
-        .agent-card h3 {
-            font-size: 18px;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        .agent-card p {
-            color: var(--text2);
-            font-size: 14px;
-            line-height: 1.6;
-        }
-
-        /* ---- Flow ---- */
-        .flow-steps {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
-        .flow-step {
-            display: flex;
-            gap: 20px;
-            align-items: flex-start;
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 24px;
-            transition: all 0.3s;
-        }
-
-        .flow-step:hover {
-            border-color: var(--blue);
-            transform: translateX(8px);
-        }
-
-        .flow-num {
-            width: 40px;
-            height: 40px;
-            border-radius: 10px;
-            background: var(--gradient);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-
-        .flow-step h4 {
-            font-size: 16px;
-            margin-bottom: 4px;
-        }
-
-        .flow-step p {
-            font-size: 14px;
-            color: var(--text2);
-        }
-
-        /* ---- Features ---- */
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-        }
-
-        .feature {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 20px;
-            text-align: center;
-            transition: all 0.3s;
-        }
-
-        .feature:hover {
-            border-color: var(--green);
-            transform: translateY(-3px);
-        }
-
-        .feature-icon {
-            font-size: 28px;
-            margin-bottom: 10px;
-            display: block;
-        }
-
-        .feature h4 {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .feature p {
-            font-size: 12px;
-            color: var(--text2);
-        }
-
-        /* ---- Footer ---- */
-        footer {
-            position: relative;
-            z-index: 1;
-            text-align: center;
-            padding: 40px 24px;
-            border-top: 1px solid var(--border);
-            color: var(--text2);
-            font-size: 14px;
-        }
-
-        footer a {
-            color: var(--violet);
-            text-decoration: none;
-        }
-
-        /* ---- Responsive ---- */
-        @media (max-width: 640px) {
-            nav {
-                padding: 14px 16px;
+        /* ─── RESPONSIVE ────────────────────────────────────── */
+        @media(max-width:768px) {
+            .slide {
+                padding: 50px 28px;
             }
 
-            .nav-links a:not(.nav-cta) {
-                display: none;
+            .grid-3 {
+                grid-template-columns: 1fr 1fr;
             }
 
-            .hero h1 {
-                font-size: 32px;
+            .grid-4 {
+                grid-template-columns: 1fr 1fr;
             }
 
-            .agents-grid {
+            .stats-row {
+                gap: 24px;
+            }
+
+            .stat-num {
+                font-size: 36px;
+            }
+
+            .nav-bar {
+                padding: 12px 20px;
+            }
+        }
+
+        @media(max-width:480px) {
+            .slide {
+                padding: 40px 20px;
+            }
+
+            .grid-2,
+            .grid-3,
+            .grid-4 {
                 grid-template-columns: 1fr;
+            }
+
+            .intro-name {
+                font-size: 36px;
+            }
+
+            .s-title {
+                font-size: 32px;
             }
         }
     </style>
 </head>
 
 <body>
-    <div class="bg-glow"></div>
 
-    <!-- Nav -->
-    <nav>
-        <span class="nav-brand">🌾 GramSetu</span>
-        <div class="nav-links">
-            <a href="#agents">Agents</a>
-            <a href="#flow">How It Works</a>
-            <a href="#features">Features</a>
-            <a href="/admin" class="nav-cta">Admin Panel →</a>
-        </div>
-    </nav>
+    <div class="deck" id="deck">
 
-    <!-- Hero -->
-    <section class="hero">
-        <span class="hero-badge">🤖 Multi-Agent System · MCP Protocol</span>
-        <h1>Bridging <span class="highlight">Rural India</span> to Government Services</h1>
-        <p>GramSetu uses an AI-powered multi-agent system to help rural Indians fill government forms automatically via
-            WhatsApp — in Hindi & English. Zero complexity, maximum impact.</p>
-        <div class="hero-buttons">
-            <a href="/admin" class="btn btn-primary">🛡️ Open Admin Panel</a>
-            <a href="#agents" class="btn btn-secondary">Learn More ↓</a>
-        </div>
-    </section>
-
-    <!-- Agents -->
-    <section class="section" id="agents">
-        <h2 class="section-title">Three Intelligent Agents</h2>
-        <p class="section-sub">Each agent specializes in one task, communicating via the Model Context Protocol (MCP)
-        </p>
-        <div class="agents-grid">
-            <div class="agent-card">
-                <span class="agent-icon">📝</span>
-                <h3>Form Filler Agent</h3>
-                <p>Matches eligible government schemes based on user profile, auto-fills form fields, and creates
-                    applications ready for review.</p>
+        <!-- ═══ SLIDE 1: INTRO ═══════════════════════════════════ -->
+        <div class="slide active" data-i="0">
+            <div class="intro-avatar anim">🌾</div>
+            <div class="intro-name anim">Vicky Nishad</div>
+            <div class="intro-handle anim">
+                <a href="https://github.com/Vickyrrrrrr" target="_blank">@Vickyrrrrrr</a>
+                &nbsp;·&nbsp; vickynishad110@gmail.com
             </div>
-            <div class="agent-card">
-                <span class="agent-icon">🔍</span>
-                <h3>Document Verifier Agent</h3>
-                <p>Verifies user documents (Aadhaar, PAN, income certificates) using DigiLocker sandbox API for
-                    authenticity checks.</p>
-            </div>
-            <div class="agent-card">
-                <span class="agent-icon">📊</span>
-                <h3>Status Tracker Agent</h3>
-                <p>Tracks submitted applications via UMANG sandbox API, provides real-time status updates and timeline
-                    tracking.</p>
+            <p class="intro-desc anim">
+                Building <strong>GramSetu</strong> — an autonomous AI agent that fills government forms
+                for 650M+ rural Indians via WhatsApp. Zero typing, zero complexity.
+            </p>
+            <div class="intro-tags anim">
+                <span class="intro-tag">NVIDIA NIM</span>
+                <span class="intro-tag">LangGraph</span>
+                <span class="intro-tag">MCP Protocol</span>
+                <span class="intro-tag">Playwright</span>
+                <span class="intro-tag">DigiLocker</span>
             </div>
         </div>
-    </section>
 
-    <!-- Flow -->
-    <section class="section" id="flow">
-        <h2 class="section-title">How It Works</h2>
-        <p class="section-sub">From WhatsApp message to submitted application — all automated</p>
-        <div class="flow-steps">
-            <div class="flow-step">
-                <div class="flow-num">1</div>
-                <div>
-                    <h4>User sends a message on WhatsApp</h4>
-                    <p>"Namaste, mujhe PM-KISAN ke liye apply karna hai" — in Hindi or English</p>
+        <!-- ═══ SLIDE 2: THE PROBLEM ═════════════════════════════ -->
+        <div class="slide" data-i="1">
+            <div class="s-label anim">The Problem</div>
+            <h2 class="s-title anim">Government forms are <em>impossible</em> for rural India</h2>
+            <p class="s-sub anim">
+                Complex portals, English-only forms, and no digital literacy.
+                Millions pay middlemen ₹500–₹2000 for basic services that should be free.
+            </p>
+            <div class="stats-row anim">
+                <div class="stat-box">
+                    <div class="stat-num">650M+</div>
+                    <div class="stat-label">Rural Indians excluded</div>
                 </div>
-            </div>
-            <div class="flow-step">
-                <div class="flow-num">2</div>
-                <div>
-                    <h4>Orchestrator detects language & collects info</h4>
-                    <p>The MCP Orchestrator auto-detects Hindi/English and guides user through a conversational flow</p>
+                <div class="stat-box">
+                    <div class="stat-num">72%</div>
+                    <div class="stat-label">Can't navigate portals</div>
                 </div>
-            </div>
-            <div class="flow-step">
-                <div class="flow-num">3</div>
-                <div>
-                    <h4>Form Filler matches schemes & fills form</h4>
-                    <p>Agent matches eligible schemes from 5+ government programs and auto-fills form fields</p>
+                <div class="stat-box">
+                    <div class="stat-num">₹2000</div>
+                    <div class="stat-label">Average middleman fee</div>
                 </div>
-            </div>
-            <div class="flow-step">
-                <div class="flow-num">4</div>
-                <div>
-                    <h4>Document Verifier checks documents</h4>
-                    <p>Aadhaar, PAN, income certificates are verified via DigiLocker sandbox</p>
-                </div>
-            </div>
-            <div class="flow-step">
-                <div class="flow-num">5</div>
-                <div>
-                    <h4>Safety Layer: Human admin reviews</h4>
-                    <p>Every application must be approved by a human before submission — prevents errors</p>
-                </div>
-            </div>
-            <div class="flow-step">
-                <div class="flow-num">6</div>
-                <div>
-                    <h4>Application submitted & tracked</h4>
-                    <p>Status Tracker monitors the application and notifies the user of updates</p>
+                <div class="stat-box">
+                    <div class="stat-num">30+</div>
+                    <div class="stat-label">Form fields per scheme</div>
                 </div>
             </div>
         </div>
-    </section>
 
-    <!-- Features -->
-    <section class="section" id="features">
-        <h2 class="section-title">Key Features</h2>
-        <p class="section-sub">Built for accessibility, safety, and scalability</p>
-        <div class="features-grid">
-            <div class="feature">
-                <span class="feature-icon">🌐</span>
-                <h4>Hindi + English</h4>
-                <p>Auto-detects language</p>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">📱</span>
-                <h4>WhatsApp Interface</h4>
-                <p>No app download needed</p>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">🤖</span>
-                <h4>MCP Protocol</h4>
-                <p>Multi-agent coordination</p>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">🛡️</span>
-                <h4>Human Safety Layer</h4>
-                <p>Admin approval required</p>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">🏛️</span>
-                <h4>Gov API Integration</h4>
-                <p>DigiLocker + UMANG</p>
-            </div>
-            <div class="feature">
-                <span class="feature-icon">💸</span>
-                <h4>100% Free</h4>
-                <p>No paid services needed</p>
+        <!-- ═══ SLIDE 3: THE SOLUTION ════════════════════════════ -->
+        <div class="slide" data-i="2">
+            <div class="s-label anim">The Solution</div>
+            <h2 class="s-title anim">Say it on WhatsApp.<br>GramSetu does the rest.</h2>
+            <p class="s-sub anim">
+                User says "राशन कार्ड चाहिए" on WhatsApp → GramSetu pulls data from DigiLocker,
+                fills the government portal using Playwright, and submits — all in under 60 seconds.
+            </p>
+            <div class="grid-3 anim">
+                <div class="card" style="text-align:center">
+                    <div class="card-icon">📱</div>
+                    <h3>WhatsApp Native</h3>
+                    <p>Works on any ₹2000 phone. No app install, no literacy needed.</p>
+                </div>
+                <div class="card" style="text-align:center">
+                    <div class="card-icon">🗣️</div>
+                    <h3>Voice First</h3>
+                    <p>Hindi voice notes transcribed by NVIDIA NeMo ASR. Just speak.</p>
+                </div>
+                <div class="card" style="text-align:center">
+                    <div class="card-icon">🤖</div>
+                    <h3>Fully Autonomous</h3>
+                    <p>DigiLocker auto-fills fields. User only says YES or NO.</p>
+                </div>
             </div>
         </div>
-    </section>
 
-    <!-- Footer -->
-    <footer>
-        <p>Built with ❤️ for <strong>Rural India</strong> · <a href="https://github.com">GramSetu</a> · Hackathon 2024
-        </p>
-    </footer>
+        <!-- ═══ SLIDE 4: THE PIPELINE ════════════════════════════ -->
+        <div class="slide" data-i="3">
+            <div class="s-label anim">Architecture</div>
+            <h2 class="s-title anim">5-Node LangGraph Pipeline</h2>
+            <p class="s-sub anim">Every message flows through five intelligent nodes with SQLite-checkpointed state</p>
+            <div class="pipe anim">
+                <div class="pipe-row">
+                    <div class="pipe-spine">
+                        <div class="pipe-dot">🎤</div>
+                        <div class="pipe-wire"></div>
+                    </div>
+                    <div class="pipe-body">
+                        <h4>1. Transcribe</h4>
+                        <p>NVIDIA NeMo ASR — voice → text in 12 Indian languages</p>
+                    </div>
+                </div>
+                <div class="pipe-row">
+                    <div class="pipe-spine">
+                        <div class="pipe-dot">🧠</div>
+                        <div class="pipe-wire"></div>
+                    </div>
+                    <div class="pipe-body">
+                        <h4>2. Detect Intent</h4>
+                        <p>Keywords + NIM Llama-3.1 → ration, pension, PM-KISAN, etc.</p>
+                    </div>
+                </div>
+                <div class="pipe-row">
+                    <div class="pipe-spine">
+                        <div class="pipe-dot">🔐</div>
+                        <div class="pipe-wire"></div>
+                    </div>
+                    <div class="pipe-body">
+                        <h4>3. DigiLocker Fetch</h4>
+                        <p>OAuth 2.0 auto-extraction — Aadhaar, PAN, income, address</p>
+                    </div>
+                </div>
+                <div class="pipe-row">
+                    <div class="pipe-spine">
+                        <div class="pipe-dot">✅</div>
+                        <div class="pipe-wire"></div>
+                    </div>
+                    <div class="pipe-body">
+                        <h4>4. Confirm</h4>
+                        <p>Show summary with 🟢/🟡 confidence — user says YES or corrects</p>
+                    </div>
+                </div>
+                <div class="pipe-row">
+                    <div class="pipe-spine">
+                        <div class="pipe-dot">🤖</div>
+                        <div class="pipe-wire"></div>
+                    </div>
+                    <div class="pipe-body">
+                        <h4>5. Fill Form</h4>
+                        <p>Playwright navigates portal, fills fields, handles OTP suspend/resume</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SLIDE 5: MCP AGENTS ══════════════════════════════ -->
+        <div class="slide" data-i="4">
+            <div class="s-label anim">Multi-Agent System</div>
+            <h2 class="s-title anim">4 Specialized MCP Servers</h2>
+            <p class="s-sub anim">Independent microservices communicating over SSE/HTTP via Model Context Protocol</p>
+            <div class="grid-2 anim">
+                <div class="card">
+                    <div class="card-icon">📱</div>
+                    <h3>WhatsApp MCP</h3>
+                    <p>Twilio webhook, OTP detection, voice download, rate limiting, HMAC signature validation</p><span
+                        class="card-tag">Port 8100</span>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🌐</div>
+                    <h3>Browser MCP</h3>
+                    <p>Playwright automation, VLM-guided vision navigation, screenshot streaming via WebSocket</p><span
+                        class="card-tag">Port 8101</span>
+                </div>
+                <div class="card">
+                    <div class="card-icon">📊</div>
+                    <h3>Audit MCP</h3>
+                    <p>PII-redacted structured logs, live audit trail, latency metrics, confidence tracking</p><span
+                        class="card-tag">Port 8102</span>
+                </div>
+                <div class="card">
+                    <div class="card-icon">🔐</div>
+                    <h3>DigiLocker MCP</h3>
+                    <p>OAuth 2.0 token exchange, Aadhaar eKYC fetch, PAN + income certificate extraction</p><span
+                        class="card-tag">Port 8103</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SLIDE 6: SCHEMES ═════════════════════════════════ -->
+        <div class="slide" data-i="5">
+            <div class="s-label anim">Coverage</div>
+            <h2 class="s-title anim">11 Government Schemes</h2>
+            <p class="s-sub anim">From welfare to banking — one WhatsApp message to apply for any of these</p>
+            <div class="grid-4 anim" style="font-size:13px;">
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">🏠</div><b>Ration Card</b>
+                    <p style="font-size:11px">BPL/APL</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">👴</div><b>Pension</b>
+                    <p style="font-size:11px">Old age/Widow</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">🏥</div><b>Ayushman</b>
+                    <p style="font-size:11px">₹5L health cover</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">⛏️</div><b>MNREGA</b>
+                    <p style="font-size:11px">100-day work</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">🪪</div><b>PAN Card</b>
+                    <p style="font-size:11px">Income tax ID</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">🗳️</div><b>Voter ID</b>
+                    <p style="font-size:11px">Election card</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">📜</div><b>Caste Cert</b>
+                    <p style="font-size:11px">SC/ST/OBC</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">👶</div><b>Birth Cert</b>
+                    <p style="font-size:11px">Registration</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">🌾</div><b>PM-KISAN</b>
+                    <p style="font-size:11px">₹6000/year</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">💳</div><b>KCC</b>
+                    <p style="font-size:11px">Farm credit</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">🏦</div><b>Jan Dhan</b>
+                    <p style="font-size:11px">Zero balance</p>
+                </div>
+                <div class="card" style="padding:16px;text-align:center">
+                    <div style="font-size:24px;margin-bottom:6px">🔍</div><b>Discovery</b>
+                    <p style="font-size:11px">AI-powered</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SLIDE 7: TECH STACK ══════════════════════════════ -->
+        <div class="slide" data-i="6">
+            <div class="s-label anim">Technology</div>
+            <h2 class="s-title anim">Production-Grade Stack</h2>
+            <p class="s-sub anim">Every dependency chosen for reliability, performance and speed</p>
+            <div class="tech-pills anim">
+                <div class="tech-pill"><span class="tp-icon">🐍</span> FastAPI <small>Server</small></div>
+                <div class="tech-pill"><span class="tp-icon">🔗</span> LangGraph <small>Orchestration</small></div>
+                <div class="tech-pill"><span class="tp-icon">🤖</span> NVIDIA NIM <small>Llama 3.1/3.3</small></div>
+                <div class="tech-pill"><span class="tp-icon">🎤</span> NeMo ASR <small>Speech-to-text</small></div>
+                <div class="tech-pill"><span class="tp-icon">🌐</span> Playwright <small>Browser auto</small></div>
+                <div class="tech-pill"><span class="tp-icon">📱</span> Twilio <small>WhatsApp API</small></div>
+                <div class="tech-pill"><span class="tp-icon">🔐</span> DigiLocker <small>OAuth 2.0</small></div>
+                <div class="tech-pill"><span class="tp-icon">🛠️</span> FastMCP <small>Protocol</small></div>
+                <div class="tech-pill"><span class="tp-icon">⚡</span> Next.js 14 <small>Webapp</small></div>
+                <div class="tech-pill"><span class="tp-icon">📊</span> Streamlit <small>Dashboard</small></div>
+                <div class="tech-pill"><span class="tp-icon">🔊</span> Edge TTS <small>Voice replies</small></div>
+                <div class="tech-pill"><span class="tp-icon">🛡️</span> Cryptography <small>AES PII</small></div>
+            </div>
+        </div>
+
+        <!-- ═══ SLIDE 8: SECURITY ════════════════════════════════ -->
+        <div class="slide" data-i="7">
+            <div class="s-label anim">Security & Privacy</div>
+            <h2 class="s-title anim">PII Protection First</h2>
+            <p class="s-sub anim">Handling Aadhaar and PAN data demands enterprise-grade security</p>
+            <div class="grid-3 anim">
+                <div class="card" style="text-align:center">
+                    <div class="card-icon">🔐</div>
+                    <h3>Zero PII on WhatsApp</h3>
+                    <p>Users never type Aadhaar/PAN. DigiLocker OAuth fetches it directly — encrypted in transit.</p>
+                </div>
+                <div class="card" style="text-align:center">
+                    <div class="card-icon">🛡️</div>
+                    <h3>Twilio HMAC</h3>
+                    <p>Every webhook verified with X-Twilio-Signature. Rate limiting per phone. Input sanitization.</p>
+                </div>
+                <div class="card" style="text-align:center">
+                    <div class="card-icon">🗑️</div>
+                    <h3>Auto-Delete</h3>
+                    <p>PII wiped after form submission. AES-256 encryption at rest. 24-hour session TTL. DPDP ready.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SLIDE 9: IMPACT ══════════════════════════════════ -->
+        <div class="slide" data-i="8">
+            <div class="s-label anim">Impact</div>
+            <h2 class="s-title anim">Real Change for Real People</h2>
+            <div class="quote-box anim" style="margin-bottom:36px;">
+                <p>"Mere paas smartphone hai lekin sarkaari website samajh nahi aati.
+                    GramSetu se maine 2 minute mein PM-KISAN ka form bhar diya."</p>
+                <cite>— Ramesh, 62, farmer, Varanasi (demo user)</cite>
+            </div>
+            <div class="stats-row anim">
+                <div class="stat-box">
+                    <div class="stat-num">&lt;60s</div>
+                    <div class="stat-label">Form completion</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num">₹0</div>
+                    <div class="stat-label">Cost to user</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num">12+</div>
+                    <div class="stat-label">Languages</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num">0</div>
+                    <div class="stat-label">Typing needed</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══ SLIDE 10: CTA ════════════════════════════════════ -->
+        <div class="slide" data-i="9">
+            <div class="cta-card anim">
+                <h2 class="s-title" style="font-size:clamp(28px,4vw,48px)">
+                    GramSetu is <em>open source</em>
+                </h2>
+                <p>Star the repo, read the scaling guide, or deploy it yourself.
+                    Built to serve 650 million rural Indians.</p>
+                <div class="cta-btns">
+                    <a href="https://github.com/Vickyrrrrrr/gramsetu" target="_blank" class="btn btn-dark">⭐ GitHub
+                        Repository</a>
+                    <a href="https://github.com/Vickyrrrrrr/gramsetu/blob/main/gramsetu/SCALING.md" target="_blank"
+                        class="btn btn-ghost">📈 Scaling Guide</a>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /deck -->
+
+    <!-- ─── NAV BAR ──────────────────────────────────────────── -->
+    <div class="nav-bar">
+        <div class="slide-counter"><b id="cur">1</b> / <span id="tot">10</span></div>
+        <div class="progress-track">
+            <div class="progress-bar" id="prog" style="width:10%"></div>
+        </div>
+        <div class="nav-btns">
+            <button class="nav-btn" id="prevBtn" disabled onclick="go(-1)">←</button>
+            <button class="nav-btn" id="nextBtn" onclick="go(1)">→</button>
+        </div>
+    </div>
+
+    <script>
+        const slides = document.querySelectorAll('.slide');
+        const total = slides.length;
+        let cur = 0, moving = false;
+
+        function goto(n) {
+            if (n === cur || n < 0 || n >= total || moving) return;
+            moving = true;
+            const dir = n > cur ? 1 : -1;
+            slides[cur].classList.remove('active');
+            slides[cur].classList.add(dir > 0 ? 'exit-up' : 'exit-down');
+            setTimeout(() => { slides[cur].classList.remove('exit-up', 'exit-down'); }, 550);
+
+            cur = n;
+            slides[cur].classList.add('active');
+            document.getElementById('cur').textContent = cur + 1;
+            document.getElementById('prog').style.width = ((cur + 1) / total * 100) + '%';
+            document.getElementById('prevBtn').disabled = cur === 0;
+            document.getElementById('nextBtn').disabled = cur === total - 1;
+
+            setTimeout(() => { moving = false; }, 550);
+        }
+        function go(d) { goto(cur + d); }
+
+        // Keyboard
+        document.addEventListener('keydown', e => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); go(1); }
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); go(-1); }
+            if (e.key === 'Home') { e.preventDefault(); goto(0); }
+            if (e.key === 'End') { e.preventDefault(); goto(total - 1); }
+        });
+
+        // Scroll/wheel
+        let scrollCD = 0;
+        window.addEventListener('wheel', e => {
+            if (Date.now() - scrollCD < 800) return;
+            scrollCD = Date.now();
+            if (e.deltaY > 30) go(1);
+            else if (e.deltaY < -30) go(-1);
+        }, { passive: true });
+
+        // Touch swipe
+        let touchY = 0;
+        window.addEventListener('touchstart', e => { touchY = e.changedTouches[0].clientY; }, { passive: true });
+        window.addEventListener('touchend', e => {
+            const dy = touchY - e.changedTouches[0].clientY;
+            if (Math.abs(dy) > 50) { dy > 0 ? go(1) : go(-1); }
+        }, { passive: true });
+    </script>
 </body>
 
 </html>
