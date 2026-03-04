@@ -579,6 +579,66 @@ async def close_browser() -> dict:
         return {"status": "error", "error": str(e)}
 
 
+# ============================================================
+# TOOL 10: Stagehand AI Fill (Natural Language)
+# ============================================================
+
+@mcp.tool()
+async def stagehand_fill(
+    url: str,
+    form_data: str,
+    form_type: str = "ration_card",
+    headless: bool = True,
+) -> dict:
+    """
+    Fill a government portal form using Stagehand AI.
+    Uses natural language actions instead of CSS selectors.
+    Self-healing — works even after portal HTML changes.
+
+    Args:
+        url:        Portal URL to navigate to
+        form_data:  JSON string of field_name -> value mapping
+        form_type:  Type of form (ration_card, pension, etc.)
+        headless:   Run browser in headless mode
+
+    Returns:
+        {"status": "filled", "fields_filled": N, "otp_detected": bool}
+    """
+    import json as _json
+
+    try:
+        from backend.stagehand_client import (
+            is_stagehand_enabled,
+            stagehand_fill_form,
+        )
+
+        if not is_stagehand_enabled():
+            return {
+                "status": "disabled",
+                "error": "Stagehand is disabled. Set USE_STAGEHAND=true in .env",
+            }
+
+        data = _json.loads(form_data) if isinstance(form_data, str) else form_data
+
+        result = await stagehand_fill_form(
+            portal_url=url,
+            form_data=data,
+            form_type=form_type,
+            headless=headless,
+        )
+
+        return {
+            "status": "filled" if result["success"] else "error",
+            "fields_filled": result.get("fields_filled", 0),
+            "otp_detected": result.get("otp_detected", False),
+            "error": result.get("error"),
+        }
+    except ImportError:
+        return {"status": "error", "error": "stagehand-py not installed"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
 # ── Entry Point ──────────────────────────────────────────────
 
 if __name__ == "__main__":

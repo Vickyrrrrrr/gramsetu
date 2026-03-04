@@ -59,6 +59,45 @@ _SESSION_TIMEOUT_SECS = 6 * 60 * 60  # 6 hours
 # any state-dict mutation issues in the LangGraph pipeline.
 _screenshot_cache: dict = {}  # session_id -> base64 PNG string
 
+# ── Browser WebSocket clients ────────────────────────────────
+# Maps session_id -> list of WebSocket connections for live preview.
+# main.py registers WS clients here; fill_form_node broadcasts frames.
+_browser_ws_clients: dict = {}  # session_id -> [WebSocket, ...]
+
+
+async def _broadcast_screenshot(session_id: str, b64: str, step: str = "",
+                                 progress: float = 0.0, user_id: str = ""):
+    """Send a browser screenshot frame to all connected WebSocket clients."""
+    import json as _json
+    # Try both session_id-based and user_id-based keys
+    targets = []
+    for key in (session_id, user_id):
+        if key and key in _browser_ws_clients:
+            targets.extend(_browser_ws_clients[key])
+    if not targets:
+        return
+    payload = _json.dumps({
+        "type": "browser_frame",
+        "screenshot": b64,
+        "step": step,
+        "progress": progress,
+    })
+    dead = []
+    for ws in targets:
+        try:
+            await ws.send_text(payload)
+        except Exception:
+            dead.append(ws)
+    # Clean up dead connections
+    for ws in dead:
+        for key in (session_id, user_id):
+            if key in _browser_ws_clients:
+                try:
+                    _browser_ws_clients[key].remove(ws)
+                except ValueError:
+                    pass
+
+
 # Keywords that signal the user wants a NEW form — not a correction
 _FORM_INTENT_KEYWORDS = {
     "ration", "rashan", "राशन",
@@ -680,15 +719,9 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
         state["next_node"] = ""
         return state
 
-    # ── New form submission — real Playwright automation ────────────────────
-    state.setdefault("audit_entries", []).append({
-        "agent": "form_filler", "node": "fill_form",
-        "action": "playwright_launch",
-        "input": portal_url, "output": f"Filling {len(form_data)} fields",
-        "confidence": 0.9, "latency_ms": 0,
-    })
+    # ── New form submission ────────────────────────────────────────────────
 
-    # Screenshot path
+    # Screenshot path (shared by both Stagehand and legacy Playwright)
     import os as _os
     screenshot_dir = _os.path.join(
         _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))),
@@ -699,226 +732,344 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     user_id_for_ws = state.get("user_id", "")  # used as WS channel key by frontend
     screenshot_path = _os.path.join(screenshot_dir, f"{form_type}_{session_id}.png")
 
-    # Build local mock portal URL with form_data as query params (URL-encoded)
+    # Build local mock portal URL (used by both paths)
     from urllib.parse import urlencode
     import os as _os2
     mock_portal_abs = _os2.path.join(
         _os2.path.dirname(_os2.path.dirname(_os2.path.dirname(_os2.path.abspath(__file__)))),
         "public", "mock_portal.html"
     )
-    # Use file:// URI so Playwright doesn't need to hit the HTTP server
-    # (avoids deadlock when uvicorn is busy handling the YES request)
     mock_portal_file_uri = "file:///" + mock_portal_abs.replace("\\", "/")
-    clean_params = {k: str(v) for k, v in form_data.items() if v}
-    clean_params["form_type"] = form_type
-    mock_portal_url = f"{mock_portal_file_uri}?{urlencode(clean_params)}"
+    # Only pass form_type — NOT the data. Playwright fills fields one-by-one
+    # so the live preview shows each field being typed (demo mode).
+    mock_portal_url = f"{mock_portal_file_uri}?form_type={form_type}"
 
+    # ── TRY STAGEHAND FIRST (AI-powered, self-healing) ────────────────────
+    # Falls back to legacy Playwright CSS selectors if Stagehand fails
+    _stagehand_used = False
     fields_filled = 0
     playwright_error = None
 
-    # ── Run Playwright in a dedicated thread with its own event loop ──────────
-    # On Windows with uvicorn, asyncio.create_subprocess_exec raises
-    # NotImplementedError inside the uvicorn ProactorEventLoop's executor.
-    # The fix: run Playwright in a fresh thread that creates its own asyncio loop.
-    import threading
-    import base64 as _b64
+    try:
+        from backend.stagehand_client import is_stagehand_enabled, stagehand_fill_form
 
-    _pw_result: dict = {"fields_filled": 0, "error": None, "screenshot_b64": ""}
+        if is_stagehand_enabled():
+            print(f"[Graph] 🤖 Using Stagehand AI for {form_type} ({len(form_data)} fields)")
 
-    def _run_playwright_sync():
-        """Run the entire Playwright session in a new event loop (thread-safe)."""
-        import asyncio as _aio
-        loop = _aio.new_event_loop()
-        _aio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(_playwright_fill(
-                mock_portal_url=mock_portal_url,
-                form_data=form_data,
-                form_type=form_type,
-                screenshot_path=screenshot_path,
-                session_id=session_id,
-                user_id_for_ws=user_id_for_ws,
-                result=_pw_result,
-            ))
-        finally:
-            loop.close()
+            state.setdefault("audit_entries", []).append({
+                "agent": "form_filler", "node": "fill_form",
+                "action": "stagehand_launch",
+                "input": portal_url, "output": f"Stagehand AI filling {len(form_data)} fields",
+                "confidence": 0.95, "latency_ms": 0,
+            })
 
-    async def _playwright_fill(mock_portal_url, form_data, form_type,
-                                screenshot_path, session_id, user_id_for_ws, result):
-        """Playwright coroutine — runs inside a fresh thread-local event loop."""
-        import asyncio as _aio
-        import base64 as _b64
-        from playwright.async_api import async_playwright
+            # Run Stagehand in a dedicated thread (same Windows event loop fix)
+            import threading
+            _sh_result = {"success": False}
 
-        print(f"[Playwright] 🚀 Launching Chrome for {form_type} — {len(form_data)} fields")
-        try:
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=False)  # visible for judges!
-                context = await browser.new_context(viewport={"width": 1280, "height": 900})
-                page = await context.new_page()
-                # Auto-dismiss any alert dialogs
-                page.on("dialog", lambda dialog: _aio.ensure_future(dialog.dismiss()))
+            def _run_stagehand_sync():
+                import asyncio as _aio
+                loop = _aio.new_event_loop()
+                _aio.set_event_loop(loop)
+                try:
+                    result = loop.run_until_complete(stagehand_fill_form(
+                        portal_url=mock_portal_url,
+                        form_data=form_data,
+                        form_type=form_type,
+                        screenshot_path=screenshot_path,
+                        headless=False,
+                    ))
+                    _sh_result.update(result)
+                except Exception as e:
+                    _sh_result["error"] = str(e)
+                    print(f"[Stagehand] ❌ Thread error: {e}")
+                finally:
+                    loop.close()
 
-                await page.goto(mock_portal_url, wait_until="domcontentloaded", timeout=15000)
-                await page.wait_for_timeout(1000)
+            sh_thread = threading.Thread(target=_run_stagehand_sync, daemon=True)
+            sh_thread.start()
+            sh_thread.join(timeout=120)
 
-                total_fields = sum(1 for v in form_data.values() if v)
-                filled_idx = 0
-                fields_filled = 0
+            if _sh_result.get("success"):
+                _stagehand_used = True
+                fields_filled = _sh_result.get("fields_filled", 0)
 
-                for field_name, field_value in form_data.items():
-                    if not field_value:
-                        continue
+                if _sh_result.get("screenshot_b64"):
+                    state["screenshot_b64"] = _sh_result["screenshot_b64"]
+                    _screenshot_cache[session_id] = _sh_result["screenshot_b64"]
                     try:
-                        locator = page.locator(f'[name="{field_name}"]').first
-                        count = await locator.count()
-                        if count == 0:
-                            continue
-
-                        await locator.scroll_into_view_if_needed(timeout=2000)
-                        await page.wait_for_timeout(200)
-                        try:
-                            await locator.click(timeout=1000)
-                        except Exception:
-                            pass
-                        await page.wait_for_timeout(150)
-
-                        tag = await locator.evaluate("el => el.tagName.toLowerCase()")
-                        if tag == "select":
-                            try:
-                                await locator.select_option(label=str(field_value), timeout=1000)
-                            except Exception:
-                                try:
-                                    await locator.select_option(value=str(field_value).lower(), timeout=1000)
-                                except Exception:
-                                    pass
-                        else:
-                            await locator.fill("")
-                            val_str = str(field_value)
-                            chunk_size = 4
-                            for ci in range(0, len(val_str), chunk_size):
-                                chunk = val_str[ci:ci + chunk_size]
-                                await locator.press_sequentially(chunk, delay=30)
-                            await page.wait_for_timeout(80)
-
-                        fields_filled += 1
-                        filled_idx += 1
-
-                        try:
-                            await locator.evaluate(
-                                "el => { el.style.transition='background-color 0.4s ease';"
-                                " el.style.backgroundColor='#d4edda'; }"
-                            )
-                        except Exception:
-                            pass
-
-                        # Live-stream screenshot to WebSocket (best-effort)
-                        try:
-                            ss_bytes = await page.screenshot(type="jpeg", quality=60)
-                            ss_b64 = _b64.b64encode(ss_bytes).decode()
-                            label = field_name.replace('_', ' ').title()
-                            progress = filled_idx / max(total_fields, 1)
-                            # WebSocket broadcast from main loop — post via thread-safe call
-                            # (fire-and-forget; OK if missed during threading)
-                            _screenshot_cache[f"ws_{session_id}"] = ss_b64
-                        except Exception:
-                            pass
-
-                        await page.wait_for_timeout(350)
-
+                        await _broadcast_screenshot(
+                            session_id, state["screenshot_b64"],
+                            step="Form filled via Stagehand AI — waiting for OTP",
+                            progress=1.0,
+                            user_id=user_id_for_ws,
+                        )
                     except Exception:
                         pass
 
-                # Check declaration + Send OTP
-                try:
-                    await page.check('#declaration')
-                    await page.wait_for_timeout(500)
-                    await page.click('#send-otp-btn')
-                    await page.wait_for_timeout(800)
-                except Exception:
-                    pass
+                print(f"[Graph] ✅ Stagehand filled {fields_filled} fields successfully")
+            else:
+                error_msg = _sh_result.get("error", "Unknown Stagehand error")
+                print(f"[Graph] ⚠️ Stagehand failed: {error_msg} — falling back to Playwright")
+    except ImportError:
+        print("[Graph] ℹ️ Stagehand not available — using legacy Playwright")
+    except Exception as e:
+        print(f"[Graph] ⚠️ Stagehand check failed: {e} — using legacy Playwright")
 
-                # Final screenshot
-                await page.screenshot(path=screenshot_path, full_page=False)
-                try:
-                    with open(screenshot_path, "rb") as _sf:
-                        final_b64 = _b64.b64encode(_sf.read()).decode()
-                    result["screenshot_b64"] = final_b64
-                    result["fields_filled"] = fields_filled
-                    _screenshot_cache[session_id] = final_b64
-                    print(f"[Playwright] 📸 Screenshot cached ({len(final_b64)} chars)")
-                except Exception as _se:
-                    print(f"[Playwright] ⚠️ Screenshot read error: {_se}")
+    # ── LEGACY PLAYWRIGHT PATH (fallback when Stagehand not used) ──────────
+    if not _stagehand_used:
 
-                await page.wait_for_timeout(2000)
-                await browser.close()
-                print(f"[Playwright] ✅ Done — {fields_filled} fields filled for {form_type}")
+        state.setdefault("audit_entries", []).append({
+            "agent": "form_filler", "node": "fill_form",
+            "action": "playwright_launch",
+            "input": portal_url, "output": f"Filling {len(form_data)} fields",
+            "confidence": 0.9, "latency_ms": 0,
+        })
 
-        except Exception as exc:
-            result["error"] = str(exc)
-            print(f"[Playwright] ❌ Error: {exc}")
+        # ── Run Playwright in a dedicated thread with its own event loop ──────────
+        # On Windows with uvicorn, asyncio.create_subprocess_exec raises
+        # NotImplementedError inside the uvicorn ProactorEventLoop's executor.
+        # The fix: run Playwright in a fresh thread that creates its own asyncio loop.
+        import threading
+        import base64 as _b64
 
-    print(f"[Playwright] 🚀 Launching Chrome for {form_type} — {len(form_data)} fields")
-    pw_thread = threading.Thread(target=_run_playwright_sync, daemon=True)
-    pw_thread.start()
-    pw_thread.join(timeout=120)  # wait up to 2 min
+        _pw_result: dict = {"fields_filled": 0, "error": None, "screenshot_b64": ""}
+        _frame_queue: list = []  # thread-safe frame queue for live preview
 
-    playwright_error = _pw_result.get("error")
-    fields_filled = _pw_result.get("fields_filled", 0)
-    if _pw_result.get("screenshot_b64"):
-        state["screenshot_b64"] = _pw_result["screenshot_b64"]
-        # Also broadcast via main loop now that thread is done
-        try:
-            await _broadcast_screenshot(
-                session_id, state["screenshot_b64"],
-                step="Form filled — waiting for OTP",
-                progress=1.0,
-                user_id=user_id_for_ws,
-            )
-        except Exception:
-            pass
-
-
-
-    if playwright_error:
-        print(f"[Playwright] ⚠️ Form fill failed: {playwright_error}")
-        # Generate fallback screenshot: a simple text summary image of the form data
-        try:
-            import base64 as _b64
-            _lines = [f"GramSetu — {form_type.replace('_', ' ').title()} Form"]
-            _lines.append("=" * 40)
-            for k, v in list(form_data.items())[:12]:
-                if v:
-                    _lines.append(f"  {k.replace('_',' ').title()}: {v}")
-            _lines.append("=" * 40)
-            _lines.append("Status: Data auto-filled from DigiLocker ✓")
-            _lines.append("Waiting for OTP to submit...")
-            _text_content = "\n".join(_lines)
-            # Create a simple PNG via PIL if available, else use a data URI SVG
+        def _run_playwright_sync():
+            """Run the entire Playwright session in a new event loop (thread-safe)."""
+            import asyncio as _aio
+            loop = _aio.new_event_loop()
+            _aio.set_event_loop(loop)
             try:
-                from PIL import Image, ImageDraw, ImageFont
-                img = Image.new("RGB", (600, 400), color=(255, 255, 255))
-                draw = ImageDraw.Draw(img)
-                y = 20
-                for line in _lines:
-                    draw.text((20, y), line, fill=(30, 30, 30))
-                    y += 22
-                import io
-                buf = io.BytesIO()
-                img.save(buf, format="PNG")
-                state["screenshot_b64"] = _b64.b64encode(buf.getvalue()).decode()
+                loop.run_until_complete(_playwright_fill(
+                    mock_portal_url=mock_portal_url,
+                    form_data=form_data,
+                    form_type=form_type,
+                    screenshot_path=screenshot_path,
+                    session_id=session_id,
+                    user_id_for_ws=user_id_for_ws,
+                    result=_pw_result,
+                    frame_queue=_frame_queue,
+                ))
+            finally:
+                loop.close()
+
+        async def _playwright_fill(mock_portal_url, form_data, form_type,
+                                    screenshot_path, session_id, user_id_for_ws,
+                                    result, frame_queue):
+            """Playwright coroutine — runs inside a fresh thread-local event loop."""
+            import asyncio as _aio
+            import base64 as _b64
+            from playwright.async_api import async_playwright
+
+            print(f"[Playwright] 🚀 Launching Chrome for {form_type} — {len(form_data)} fields")
+            try:
+                async with async_playwright() as pw:
+                    browser = await pw.chromium.launch(headless=False)  # visible for demo
+                    context = await browser.new_context(viewport={"width": 1280, "height": 900})
+                    page = await context.new_page()
+                    # Auto-dismiss any alert dialogs
+                    page.on("dialog", lambda dialog: _aio.ensure_future(dialog.dismiss()))
+
+                    await page.goto(mock_portal_url, wait_until="domcontentloaded", timeout=15000)
+                    await page.wait_for_timeout(1000)
+
+                    total_fields = sum(1 for v in form_data.values() if v)
+                    filled_idx = 0
+                    fields_filled = 0
+
+                    for field_name, field_value in form_data.items():
+                        if not field_value:
+                            continue
+                        try:
+                            locator = page.locator(f'[name="{field_name}"]').first
+                            count = await locator.count()
+                            if count == 0:
+                                continue
+
+                            await locator.scroll_into_view_if_needed(timeout=2000)
+                            await page.wait_for_timeout(200)
+                            try:
+                                await locator.click(timeout=1000)
+                            except Exception:
+                                pass
+                            await page.wait_for_timeout(150)
+
+                            tag = await locator.evaluate("el => el.tagName.toLowerCase()")
+                            if tag == "select":
+                                try:
+                                    await locator.select_option(label=str(field_value), timeout=1000)
+                                except Exception:
+                                    try:
+                                        await locator.select_option(value=str(field_value).lower(), timeout=1000)
+                                    except Exception:
+                                        pass
+                            else:
+                                await locator.fill("")
+                                val_str = str(field_value)
+                                chunk_size = 4
+                                for ci in range(0, len(val_str), chunk_size):
+                                    chunk = val_str[ci:ci + chunk_size]
+                                    await locator.press_sequentially(chunk, delay=30)
+                                await page.wait_for_timeout(80)
+
+                            fields_filled += 1
+                            filled_idx += 1
+
+                            try:
+                                await locator.evaluate(
+                                    "el => el.classList.add('filled')"
+                                )
+                            except Exception:
+                                pass
+
+                            # Push screenshot frame to queue for live WebSocket streaming
+                            try:
+                                ss_bytes = await page.screenshot(type="jpeg", quality=60)
+                                ss_b64 = _b64.b64encode(ss_bytes).decode()
+                                label = field_name.replace('_', ' ').title()
+                                progress = filled_idx / max(total_fields, 1)
+                                frame_queue.append({
+                                    "b64": ss_b64,
+                                    "step": f"Filling: {label}",
+                                    "progress": progress,
+                                })
+                                print(f"[Playwright] 📡 Frame queued: {label} ({int(progress*100)}%) — queue size: {len(frame_queue)}")
+                            except Exception:
+                                pass
+
+                            await page.wait_for_timeout(350)
+
+                        except Exception:
+                            pass
+
+                    # Check declaration + Send OTP
+                    try:
+                        await page.check('#declaration')
+                        await page.wait_for_timeout(500)
+                        await page.click('#send-otp-btn')
+                        await page.wait_for_timeout(800)
+                    except Exception:
+                        pass
+
+                    # Final screenshot
+                    await page.screenshot(path=screenshot_path, full_page=False)
+                    try:
+                        with open(screenshot_path, "rb") as _sf:
+                            final_b64 = _b64.b64encode(_sf.read()).decode()
+                        result["screenshot_b64"] = final_b64
+                        result["fields_filled"] = fields_filled
+                        _screenshot_cache[session_id] = final_b64
+                        print(f"[Playwright] 📸 Screenshot cached ({len(final_b64)} chars)")
+                    except Exception as _se:
+                        print(f"[Playwright] ⚠️ Screenshot read error: {_se}")
+
+                    await page.wait_for_timeout(2000)
+                    await browser.close()
+                    print(f"[Playwright] ✅ Done — {fields_filled} fields filled for {form_type}")
+
+            except Exception as exc:
+                result["error"] = str(exc)
+                print(f"[Playwright] ❌ Error: {exc}")
+
+        print(f"[Playwright] 🚀 Launching Chrome for {form_type} — {len(form_data)} fields")
+        print(f"[Playwright] 📡 WS keys: session_id={session_id}, user_id={user_id_for_ws}")
+        print(f"[Playwright] 📡 WS clients registered: {list(_browser_ws_clients.keys())}")
+        pw_thread = threading.Thread(target=_run_playwright_sync, daemon=True)
+        pw_thread.start()
+
+        # Poll frame queue and broadcast live screenshots while thread runs
+        _last_sent_idx = 0
+        while pw_thread.is_alive():
+            await asyncio.sleep(0.3)
+            # Drain new frames from the queue
+            while _last_sent_idx < len(_frame_queue):
+                frame = _frame_queue[_last_sent_idx]
+                _last_sent_idx += 1
+                try:
+                    await _broadcast_screenshot(
+                        session_id, frame["b64"],
+                        step=frame["step"],
+                        progress=frame["progress"],
+                        user_id=user_id_for_ws,
+                    )
+                    print(f"[Playwright] 📡 Frame sent via WS: {frame['step']}")
+                except Exception as _ws_err:
+                    print(f"[Playwright] ⚠️ WS broadcast error: {_ws_err}")
+
+        pw_thread.join(timeout=5)  # should already be done
+
+        # Send any remaining frames
+        while _last_sent_idx < len(_frame_queue):
+            frame = _frame_queue[_last_sent_idx]
+            _last_sent_idx += 1
+            try:
+                await _broadcast_screenshot(
+                    session_id, frame["b64"],
+                    step=frame["step"],
+                    progress=frame["progress"],
+                    user_id=user_id_for_ws,
+                )
             except Exception:
-                pass  # no PIL — skip fallback image
-        except Exception:
-            pass
+                pass
+
+        playwright_error = _pw_result.get("error")
+        fields_filled = _pw_result.get("fields_filled", 0)
+        if _pw_result.get("screenshot_b64"):
+            state["screenshot_b64"] = _pw_result["screenshot_b64"]
+            # Also broadcast via main loop now that thread is done
+            try:
+                await _broadcast_screenshot(
+                    session_id, state["screenshot_b64"],
+                    step="Form filled — waiting for OTP",
+                    progress=1.0,
+                    user_id=user_id_for_ws,
+                )
+            except Exception:
+                pass
+
+        if playwright_error:
+            print(f"[Playwright] ⚠️ Form fill failed: {playwright_error}")
+            # Generate fallback screenshot: a simple text summary image of the form data
+            try:
+                import base64 as _b64
+                _lines = [f"GramSetu — {form_type.replace('_', ' ').title()} Form"]
+                _lines.append("=" * 40)
+                for k, v in list(form_data.items())[:12]:
+                    if v:
+                        _lines.append(f"  {k.replace('_',' ').title()}: {v}")
+                _lines.append("=" * 40)
+                _lines.append("Status: Data auto-filled from DigiLocker ✓")
+                _lines.append("Waiting for OTP to submit...")
+                _text_content = "\n".join(_lines)
+                # Create a simple PNG via PIL if available, else use a data URI SVG
+                try:
+                    from PIL import Image, ImageDraw, ImageFont
+                    img = Image.new("RGB", (600, 400), color=(255, 255, 255))
+                    draw = ImageDraw.Draw(img)
+                    y = 20
+                    for line in _lines:
+                        draw.text((20, y), line, fill=(30, 30, 30))
+                        y += 22
+                    import io
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    state["screenshot_b64"] = _b64.b64encode(buf.getvalue()).decode()
+                except Exception:
+                    pass  # no PIL — skip fallback image
+            except Exception:
+                pass
 
     # Government portals always need OTP → graph SUSPENDS
-    filled_label = f"{fields_filled}" if not playwright_error else "N/A"
+    filled_label = f"{fields_filled}" if (not playwright_error or _stagehand_used) else "N/A"
+    engine_label = "Stagehand AI" if _stagehand_used else "Playwright"
     state["response"] = await _localized(
         (
             "🌐 *पोर्टल पर फ़ॉर्म भर दिया!*\n\n"
             f"📍 सरकारी पोर्टल — {form_type.replace('_', ' ').title()}\n"
-            f"✅ {filled_label} फ़ील्ड भरे गए (DigiLocker से स्वतः)\n\n"
+            f"✅ {filled_label} फ़ील्ड भरे गए (DigiLocker से स्वतः)\n"
+            f"🤖 इंजन: {engine_label}\n\n"
             "🔐 *OTP आवश्यक है*\n"
             "पोर्टल ने आपके रजिस्टर्ड मोबाइल पर 6-अंकीय कोड भेजा है।\n\n"
             "👉 वह कोड यहाँ भेजें:"
@@ -926,7 +1077,8 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
         (
             "🌐 *Form filled on portal!*\n\n"
             f"📍 Government Portal — {form_type.replace('_', ' ').title()}\n"
-            f"✅ {filled_label} fields filled automatically from DigiLocker\n\n"
+            f"✅ {filled_label} fields filled automatically from DigiLocker\n"
+            f"🤖 Engine: {engine_label}\n\n"
             "🔐 *OTP Required*\n"
             "The portal sent a 6-digit code to your registered mobile.\n\n"
             "👉 Send that code here:"
@@ -939,6 +1091,7 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     state["next_node"] = "fill_form"
     state["browser_launched"] = True
     state["screenshot_path"] = screenshot_path
+    state["stagehand_used"] = _stagehand_used
 
     latency = (time.time() - start) * 1000
     state.setdefault("audit_entries", []).append({
@@ -1033,11 +1186,7 @@ async def process_message(
     4. Resume WAIT_OTP -> submit OTP and complete
     """
     if not session_id:
-        # Use user_phone as the stable thread_id so the LangGraph checkpoint
-        # (WAIT_CONFIRM, WAIT_OTP, etc.) persists across requests and server restarts.
-        # A random UUID was previously used here, which caused the "YES shows
-        # welcome menu" bug because each request got a fresh session with no state.
-        session_id = user_phone if user_phone else user_id
+        session_id = str(uuid.uuid4())
 
     async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
         compiled = build_graph().compile(checkpointer=checkpointer)
