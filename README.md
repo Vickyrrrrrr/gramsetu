@@ -27,7 +27,7 @@ GramSetu replies in under 2 seconds, fetches all required data from DigiLocker a
 ```bash
 # Clone
 git clone https://github.com/Vickyrrrrrr/gramsetu.git
-cd gramsetu
+cd gramsetu/gramsetu      # ← must be in this subfolder
 
 # Create venv and install
 python -m venv .venv
@@ -171,17 +171,25 @@ Your Laptop
 **Steps before demo:**
 
 ```powershell
-# Terminal 1 — backend
-cd gramsetu
+# Terminal 1 — backend (IMPORTANT: run from the gramsetu subfolder)
+cd gramsetu\gramsetu
 .venv\Scripts\activate
+python -m whatsapp_bot.main
+# or for full MCP stack:
 .\start.ps1 -All
 
 # Terminal 2 — web app
-cd gramsetu\webapp
+cd gramsetu\gramsetu\webapp
 npm run dev
 
-# Terminal 3 — ngrok (for WhatsApp to reach your laptop)
-ngrok http 8000
+# Terminal 3 — ngrok (named tunnel, bypasses browser warning page)
+# Edit %APPDATA%\Local\ngrok\ngrok.yml to add:
+# tunnels:
+#   gramsetu:
+#     proto: http
+#     addr: 8000
+#     inspect: false
+ngrok start gramsetu
 # Copy the https URL → Twilio console → WhatsApp sandbox webhook
 ```
 
@@ -256,6 +264,36 @@ npx vercel --prod
 - OTP validated as 4–6 digits only before graph resume
 - SQLite checkpoint — sessions survive server restarts
 - `.env` is gitignored — API keys never committed
+
+---
+
+## WhatsApp Provider Options
+
+| Provider | Cost | Limit | Best For |
+|---|---|---|---|
+| **Twilio Sandbox** | Free | ~10 msgs/day cap (error 63038) | Quick testing |
+| **Meta Cloud API** | Free | No cap | Hackathon / staging |
+| **360dialog** | ~€49/month | Unlimited | Production |
+| **whatsapp-web.js** | Free (unofficial) | Your own number | Internal demos only |
+
+> **Switching to Meta Cloud API** is recommended when Twilio sandbox daily cap is hit.  
+> Webhook format changes slightly (JSON vs form-data) but routes to the same backend.
+
+---
+
+## Troubleshooting
+
+### Twilio error 63038 — "Daily cap reached"
+Twilio sandbox allows only a limited number of unique WhatsApp conversations per day.  
+**Fix:** Wait 24 hours for reset, or switch to Meta Cloud API (free, no cap).
+
+### ngrok browser warning page blocking Twilio
+Twilio's servers don't send a browser User-Agent, so ngrok may intercept requests with an HTML challenge page.  
+**Fix (already applied):** The FastAPI server includes `NgrokBypassMiddleware` that adds the `ngrok-skip-browser-warning: true` header to all responses. Use a named ngrok tunnel with `inspect: false` in `ngrok.yml`.
+
+### `ModuleNotFoundError: No module named 'whatsapp_bot'`
+You're running from the wrong directory.  
+**Fix:** Always run `python -m whatsapp_bot.main` from inside `gramsetu/gramsetu/`, not the repo root.
 
 ---
 
