@@ -725,13 +725,6 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
 
     _pw_result: dict = {"fields_filled": 0, "error": None, "screenshot_b64": ""}
 
-    # Capture the main FastAPI event loop so the Playwright thread can
-    # broadcast WebSocket frames back to connected clients in real-time.
-    try:
-        _main_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        _main_loop = None
-
     def _run_playwright_sync():
         """Run the entire Playwright session in a new event loop (thread-safe)."""
         import asyncio as _aio
@@ -746,18 +739,15 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
                 session_id=session_id,
                 user_id_for_ws=user_id_for_ws,
                 result=_pw_result,
-                main_loop=_main_loop,
             ))
         finally:
             loop.close()
 
     async def _playwright_fill(mock_portal_url, form_data, form_type,
-                                screenshot_path, session_id, user_id_for_ws, result,
-                                main_loop=None):
+                                screenshot_path, session_id, user_id_for_ws, result):
         """Playwright coroutine — runs inside a fresh thread-local event loop."""
         import asyncio as _aio
         import base64 as _b64
-        import time as _time
         from playwright.async_api import async_playwright
 
         print(f"[Playwright] 🚀 Launching Chrome for {form_type} — {len(form_data)} fields")
@@ -775,7 +765,6 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
                 total_fields = sum(1 for v in form_data.values() if v)
                 filled_idx = 0
                 fields_filled = 0
-                _last_frame_ts = 0  # throttle: min 300ms between frames
 
                 for field_name, field_value in form_data.items():
                     if not field_value:
@@ -823,33 +812,17 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
                         except Exception:
                             pass
 
-                        # Live-stream screenshot to WebSocket (best-effort, throttled)
-                        _now = _time.monotonic()
-                        if _now - _last_frame_ts >= 0.3:  # 300ms throttle
-                            try:
-                                ss_bytes = await page.screenshot(type="jpeg", quality=75)
-                                ss_b64 = _b64.b64encode(ss_bytes).decode()
-                                label = field_name.replace('_', ' ').title()
-                                progress = filled_idx / max(total_fields, 1)
-                                # Cache for polling fallback
-                                _screenshot_cache[f"ws_{session_id}"] = ss_b64
-                                # Thread-safe broadcast to main event loop's WebSocket clients
-                                if main_loop is not None and not main_loop.is_closed():
-                                    try:
-                                        _aio.run_coroutine_threadsafe(
-                                            _broadcast_screenshot(
-                                                session_id, ss_b64,
-                                                step=f"Filling: {label}",
-                                                progress=progress,
-                                                user_id=user_id_for_ws,
-                                            ),
-                                            main_loop,
-                                        )  # fire-and-forget: don't block on result
-                                    except Exception:
-                                        pass
-                                _last_frame_ts = _now
-                            except Exception:
-                                pass
+                        # Live-stream screenshot to WebSocket (best-effort)
+                        try:
+                            ss_bytes = await page.screenshot(type="jpeg", quality=60)
+                            ss_b64 = _b64.b64encode(ss_bytes).decode()
+                            label = field_name.replace('_', ' ').title()
+                            progress = filled_idx / max(total_fields, 1)
+                            # WebSocket broadcast from main loop — post via thread-safe call
+                            # (fire-and-forget; OK if missed during threading)
+                            _screenshot_cache[f"ws_{session_id}"] = ss_b64
+                        except Exception:
+                            pass
 
                         await page.wait_for_timeout(350)
 

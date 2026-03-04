@@ -247,7 +247,7 @@ function McpPanel({
           style={{ background: '#F7F6F3', borderLeft: '1px solid #E5E5E0' }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b"
-            style={{ borderColor: '#E5E5E0' }}>
+               style={{ borderColor: '#E5E5E0' }}>
             <h3 className="font-semibold text-sm flex items-center gap-2">
               <Activity size={14} /> Live Systems
             </h3>
@@ -483,21 +483,13 @@ function BrowserPreview({
         </div>
       </div>
 
-      {/* screenshot — smooth crossfade via CSS transition */}
-      <div className="relative w-full overflow-hidden" style={{ maxHeight: 280, background: '#f5f5f5' }}>
-        <img
-          src={`data:image/jpeg;base64,${frame}`}
-          alt="Browser preview"
-          className="w-full"
-          style={{
-            maxHeight: 280,
-            objectFit: 'cover',
-            objectPosition: 'top',
-            transition: 'opacity 0.3s ease-in-out',
-          }}
-          onLoad={(e) => { (e.target as HTMLImageElement).style.opacity = '1'; }}
-        />
-      </div>
+      {/* screenshot */}
+      <img
+        src={`data:image/jpeg;base64,${frame}`}
+        alt="Browser preview"
+        className="w-full"
+        style={{ maxHeight: 280, objectFit: 'cover', objectPosition: 'top' }}
+      />
 
       {/* progress footer */}
       <div className="px-3 py-2" style={{ borderTop: '1px solid #E5E5E0' }}>
@@ -671,12 +663,9 @@ export default function AppPage() {
         try {
           const msg = JSON.parse(ev.data)
           if (msg.type === 'browser_frame') {
-            // Debounce via rAF to sync with browser paint cycle — prevents flicker
-            requestAnimationFrame(() => {
-              setBrowserFrame(msg.screenshot)
-              setBrowserStep(msg.step || '')
-              setBrowserProgress(msg.progress ?? 0)
-            })
+            setBrowserFrame(msg.screenshot)
+            setBrowserStep(msg.step || '')
+            setBrowserProgress(msg.progress ?? 0)
           }
         } catch { /* ignore non-json */ }
       }
@@ -956,12 +945,14 @@ export default function AppPage() {
           ) : (
             <div
               key={m.id}
-              className={`flex fade-up ${m.role === 'user' ? 'justify-end' : 'justify-start'
-                }`}
+              className={`flex fade-up ${
+                m.role === 'user' ? 'justify-end' : 'justify-start'
+              }`}
             >
               <div
-                className={`max-w-[82%] px-4 py-3 text-sm leading-relaxed ${m.role === 'user' ? 'msg-user' : 'msg-ai'
-                  }`}
+                className={`max-w-[82%] px-4 py-3 text-sm leading-relaxed ${
+                  m.role === 'user' ? 'msg-user' : 'msg-ai'
+                }`}
               >
                 {/* DigiLocker badge (Upgrade 8) */}
                 {m.digilockerStatus === 'demo_connected' && (
