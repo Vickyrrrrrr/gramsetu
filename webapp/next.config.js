@@ -5,6 +5,13 @@
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
 
 const nextConfig = {
+  // Increase the serverless function / proxy timeout to 5 minutes so
+  // long-running Playwright form-fill operations don't cause ECONNRESET.
+  serverExternalPackages: [],
+  experimental: {
+    // proxyTimeout is in milliseconds — 5 minutes for form automation
+    proxyTimeout: 5 * 60 * 1000,
+  },
   async rewrites() {
     return [
       {

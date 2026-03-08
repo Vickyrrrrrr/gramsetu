@@ -247,7 +247,7 @@ function McpPanel({
           style={{ background: '#F7F6F3', borderLeft: '1px solid #E5E5E0' }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b"
-            style={{ borderColor: '#E5E5E0' }}>
+               style={{ borderColor: '#E5E5E0' }}>
             <h3 className="font-semibold text-sm flex items-center gap-2">
               <Activity size={14} /> Live Systems
             </h3>
@@ -410,25 +410,23 @@ function BrowserPreview({
   frame,
   step,
   progress,
-  viewMode,
+  minimized,
   onMinimize,
-  onNormal,
   onMaximize,
   onClose,
 }: {
   frame: string | null
   step: string
   progress: number
-  viewMode: 'minimized' | 'normal' | 'maximized'
+  minimized: boolean
   onMinimize: () => void
-  onNormal: () => void
   onMaximize: () => void
   onClose: () => void
 }) {
   if (!frame) return null
 
   /* minimized pill */
-  if (viewMode === 'minimized') {
+  if (minimized) {
     return (
       <motion.button
         layout
@@ -436,17 +434,18 @@ function BrowserPreview({
         animate={{ scale: 1, opacity: 1 }}
         exit={{ scale: 0.6, opacity: 0 }}
         transition={{ type: 'spring', damping: 22, stiffness: 300 }}
-        onClick={onNormal}
-        className="fixed bottom-20 right-4 z-50 w-14 h-14 rounded-full shadow-lg flex items-center justify-center"
+        onClick={onMaximize}
+        className="fixed bottom-20 right-4 z-50 w-12 h-12 rounded-full shadow-lg flex items-center justify-center"
         style={{ background: '#0C0C0C', color: '#F7F6F3' }}
         title="Show browser preview"
       >
-        <Monitor size={20} />
-        <svg className="absolute inset-0 w-14 h-14 -rotate-90" viewBox="0 0 56 56">
-          <circle cx="28" cy="28" r="24" fill="none" stroke="#E5E5E0" strokeWidth="3" />
+        <Monitor size={18} />
+        {/* progress ring */}
+        <svg className="absolute inset-0 w-12 h-12 -rotate-90" viewBox="0 0 48 48">
+          <circle cx="24" cy="24" r="20" fill="none" stroke="#E5E5E0" strokeWidth="3" />
           <circle
-            cx="28" cy="28" r="24" fill="none" stroke="#22c55e" strokeWidth="3"
-            strokeDasharray={`${150.8 * progress} 150.8`}
+            cx="24" cy="24" r="20" fill="none" stroke="#22c55e" strokeWidth="3"
+            strokeDasharray={`${125.6 * progress} 125.6`}
             strokeLinecap="round"
             style={{ transition: 'stroke-dasharray 0.4s ease' }}
           />
@@ -455,9 +454,7 @@ function BrowserPreview({
     )
   }
 
-  const isMax = viewMode === 'maximized'
-
-  /* normal or maximized panel */
+  /* expanded panel */
   return (
     <motion.div
       layout
@@ -465,39 +462,23 @@ function BrowserPreview({
       animate={{ y: 0, opacity: 1, scale: 1 }}
       exit={{ y: 60, opacity: 0, scale: 0.92 }}
       transition={{ type: 'spring', damping: 25, stiffness: 280 }}
-      className={`fixed z-50 rounded-xl shadow-2xl overflow-hidden ${isMax
-        ? 'inset-4'
-        : 'bottom-20 right-4 w-[520px]'
-        }`}
+      className="fixed bottom-20 right-4 z-50 w-[380px] rounded-xl shadow-2xl overflow-hidden"
       style={{ background: 'white', border: '1px solid #E5E5E0' }}
     >
       {/* header */}
       <div
-        className="flex items-center justify-between px-4 py-2.5"
+        className="flex items-center justify-between px-3 py-2"
         style={{ background: '#0C0C0C', color: '#F7F6F3' }}
       >
-        <span className="text-sm font-medium flex items-center gap-2">
-          <Monitor size={14} />
-          <span className="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          Live Form Filling
+        <span className="text-xs font-medium flex items-center gap-1.5">
+          <Monitor size={12} /> Live Form Filling
         </span>
-        <div className="flex items-center gap-1.5">
-          {isMax ? (
-            <button onClick={onNormal} className="p-1 rounded hover:bg-white/10 transition-colors" title="Restore">
-              <Minimize2 size={14} />
-            </button>
-          ) : (
-            <>
-              <button onClick={onMaximize} className="p-1 rounded hover:bg-white/10 transition-colors" title="Maximize">
-                <Maximize2 size={14} />
-              </button>
-              <button onClick={onMinimize} className="p-1 rounded hover:bg-white/10 transition-colors" title="Minimize">
-                <Minimize2 size={14} />
-              </button>
-            </>
-          )}
-          <button onClick={onClose} className="p-1 rounded hover:bg-white/10 transition-colors" title="Close">
-            <X size={14} />
+        <div className="flex items-center gap-1">
+          <button onClick={onMinimize} className="p-1 rounded hover:bg-white/10 transition-colors">
+            <Minimize2 size={12} />
+          </button>
+          <button onClick={onClose} className="p-1 rounded hover:bg-white/10 transition-colors">
+            <X size={12} />
           </button>
         </div>
       </div>
@@ -507,28 +488,23 @@ function BrowserPreview({
         src={`data:image/jpeg;base64,${frame}`}
         alt="Browser preview"
         className="w-full"
-        style={{
-          maxHeight: isMax ? 'calc(100vh - 120px)' : 500,
-          objectFit: 'contain',
-          objectPosition: 'top',
-          background: '#f0f0f0',
-        }}
+        style={{ maxHeight: 280, objectFit: 'cover', objectPosition: 'top' }}
       />
 
       {/* progress footer */}
-      <div className="px-4 py-2.5" style={{ borderTop: '1px solid #E5E5E0' }}>
-        <div className="flex items-center justify-between mb-1.5">
-          <p className="text-sm font-medium truncate" style={{ color: '#0C0C0C', maxWidth: '80%' }}>
+      <div className="px-3 py-2" style={{ borderTop: '1px solid #E5E5E0' }}>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-medium truncate" style={{ color: '#0C0C0C', maxWidth: '80%' }}>
             {step || 'Filling form…'}
           </p>
-          <span className="text-sm font-semibold tabular-nums" style={{ color: '#22c55e' }}>
+          <span className="text-xs tabular-nums" style={{ color: '#6B6B6B' }}>
             {Math.round(progress * 100)}%
           </span>
         </div>
-        <div className="w-full h-2 rounded-full" style={{ background: '#E5E5E0' }}>
+        <div className="w-full h-1.5 rounded-full" style={{ background: '#E5E5E0' }}>
           <motion.div
             className="h-full rounded-full"
-            style={{ background: 'linear-gradient(90deg, #22c55e, #16a34a)' }}
+            style={{ background: '#22c55e' }}
             initial={{ width: 0 }}
             animate={{ width: `${progress * 100}%` }}
             transition={{ duration: 0.4, ease: 'easeOut' }}
@@ -608,7 +584,7 @@ export default function AppPage() {
   const [browserFrame, setBrowserFrame] = useState<string | null>(null)
   const [browserStep, setBrowserStep] = useState('')
   const [browserProgress, setBrowserProgress] = useState(0)
-  const [browserViewMode, setBrowserViewMode] = useState<'minimized' | 'normal' | 'maximized'>('normal')
+  const [browserMinimized, setBrowserMinimized] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
 
   const listRef = useRef<HTMLDivElement>(null)
@@ -759,12 +735,9 @@ export default function AppPage() {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' }
         if (langOverride) headers['X-Language'] = langOverride
 
-        const controller = new AbortController()
-        const timeout = setTimeout(() => controller.abort(), 120_000) // 2 min timeout
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers,
-          signal: controller.signal,
           body: JSON.stringify({
             message: text,
             user_id: userId,
@@ -772,7 +745,6 @@ export default function AppPage() {
             language: langOverride || undefined,
           }),
         })
-        clearTimeout(timeout)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
 
@@ -973,12 +945,14 @@ export default function AppPage() {
           ) : (
             <div
               key={m.id}
-              className={`flex fade-up ${m.role === 'user' ? 'justify-end' : 'justify-start'
-                }`}
+              className={`flex fade-up ${
+                m.role === 'user' ? 'justify-end' : 'justify-start'
+              }`}
             >
               <div
-                className={`max-w-[82%] px-4 py-3 text-sm leading-relaxed ${m.role === 'user' ? 'msg-user' : 'msg-ai'
-                  }`}
+                className={`max-w-[82%] px-4 py-3 text-sm leading-relaxed ${
+                  m.role === 'user' ? 'msg-user' : 'msg-ai'
+                }`}
               >
                 {/* DigiLocker badge (Upgrade 8) */}
                 {m.digilockerStatus === 'demo_connected' && (
@@ -1173,15 +1147,13 @@ export default function AppPage() {
             frame={browserFrame}
             step={browserStep}
             progress={browserProgress}
-            viewMode={browserViewMode}
-            onMinimize={() => setBrowserViewMode('minimized')}
-            onNormal={() => setBrowserViewMode('normal')}
-            onMaximize={() => setBrowserViewMode('maximized')}
+            minimized={browserMinimized}
+            onMinimize={() => setBrowserMinimized(true)}
+            onMaximize={() => setBrowserMinimized(false)}
             onClose={() => {
               setBrowserFrame(null)
               setBrowserStep('')
               setBrowserProgress(0)
-              setBrowserViewMode('normal')
             }}
           />
         )}

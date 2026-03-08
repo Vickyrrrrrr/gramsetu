@@ -25,7 +25,6 @@ edge-tts>=7.0.0                       # Free TTS via Microsoft Edge voices
 # ── Browser Automation (Playwright + VLM Navigation) ────────
 playwright>=1.49.0                    # Govt portal form-filling
 Pillow>=11.0.0                        # Screenshot processing for VLM
-stagehand-py>=1.0.0                   # AI browser automation (Groq/LLM-powered Stagehand)
 
 # ── WhatsApp Integration (Twilio + FastAPI) ──────────────────
 fastapi>=0.115.0
