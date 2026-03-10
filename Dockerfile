@@ -50,4 +50,4 @@ RUN mkdir -p data
 EXPOSE 8000
 
 # Run the FastAPI server
-CMD ["sh", "-c", "uvicorn whatsapp_bot.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["uvicorn", "whatsapp_bot.main:app", "--host", "0.0.0.0", "--port", "8000"]
