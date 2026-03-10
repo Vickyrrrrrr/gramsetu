@@ -248,7 +248,7 @@ function McpPanel({
           style={{ background: '#F7F6F3', borderLeft: '1px solid #E5E5E0' }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b"
-               style={{ borderColor: '#E5E5E0' }}>
+            style={{ borderColor: '#E5E5E0' }}>
             <h3 className="font-semibold text-sm flex items-center gap-2">
               <Activity size={14} /> Live Systems
             </h3>
@@ -648,7 +648,8 @@ export default function AppPage() {
   /* ── Browser preview WebSocket — always-on with auto-reconnect ── */
   useEffect(() => {
     const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const backendHost = 'localhost:8000'
+    const apiEnv = process.env.NEXT_PUBLIC_API_URL || ''
+    const backendHost = apiEnv ? apiEnv.replace(/^https?:\/\//, '') : window.location.host
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let alive = true
@@ -947,14 +948,12 @@ export default function AppPage() {
           ) : (
             <div
               key={m.id}
-              className={`flex fade-up ${
-                m.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
+              className={`flex fade-up ${m.role === 'user' ? 'justify-end' : 'justify-start'
+                }`}
             >
               <div
-                className={`max-w-[82%] px-4 py-3 text-sm leading-relaxed ${
-                  m.role === 'user' ? 'msg-user' : 'msg-ai'
-                }`}
+                className={`max-w-[82%] px-4 py-3 text-sm leading-relaxed ${m.role === 'user' ? 'msg-user' : 'msg-ai'
+                  }`}
               >
                 {/* DigiLocker badge (Upgrade 8) */}
                 {m.digilockerStatus === 'demo_connected' && (
