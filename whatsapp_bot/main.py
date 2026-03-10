@@ -1,109 +1,83 @@
-"""
+﻿"""
 ============================================================
-main.py — FastAPI Server (GramSetu v3 — Production)
+main.py -- GramSetu Web API Server (v3)
 ============================================================
-Handles:
-  - Twilio WhatsApp webhooks (text + voice + OTP)
-  - LangGraph v3 autonomous flow with DigiLocker
-  - Scheme discovery ("you're eligible for 5 schemes!")
-  - OTP suspend/resume
-  - DigiLocker OAuth callback
-  - Voice TTS replies
-  - Security: Twilio HMAC, rate limiting, PII encryption
-  - Application status tracking
+REST API server for the GramSetu web app.
 
-Run: python -m whatsapp_bot.main
+Endpoints:
+  POST /api/chat             -- Chat with the AI agent
+  POST /api/voice            -- Upload audio, get transcription
+  POST /api/otp/{user_id}    -- Resume a form fill after OTP
+  POST /api/schemes          -- Discover eligible schemes
+  POST /api/tts              -- Generate TTS audio
+  POST /api/status           -- Check application status
+  GET  /api/impact           -- Public impact metrics
+  GET  /api/health           -- Service health check
+  GET  /api/mcp-status       -- MCP + LLM provider status
+  GET  /callback/digilocker  -- DigiLocker OAuth callback
+
+Run: python -m whatsapp_bot.main   OR   start.ps1
 """
 
 import os
 import sys
 import asyncio
-import uuid
+import tempfile
+from typing import TypedDict
+
 import uvicorn
-import httpx
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from twilio.twiml.messaging_response import MessagingResponse
 from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 load_dotenv()
 
-# ── v2 legacy pipeline ──────────────────────────────────────
-from agent_core.agents import process_message as v2_process_message
-from whatsapp_bot.voice_handler import download_audio_async, transcribe_audio, cleanup_audio
+from whatsapp_bot.voice_handler import transcribe_audio
 from whatsapp_bot.language_utils import detect_language
 import data.db as db
 
-# ── v3 LangGraph pipeline ───────────────────────────────────
 from backend.agents.graph import process_message as v3_process_message
 from backend.agents.schema import GraphStatus
-
-# ── Security ─────────────────────────────────────────────────
-from backend.security import (
-    validate_twilio_signature, webhook_limiter, api_limiter,
-    sanitize_input, validate_otp_input,
-)
-
-# ── Scheme Discovery ─────────────────────────────────────────
+from backend.security import api_limiter, sanitize_input, validate_otp_input
 from backend.schemes import discover_schemes
+from backend.voice_tts import text_to_speech
 
-# ── Voice TTS ────────────────────────────────────────────────
-from backend.voice_tts import text_to_speech, generate_summary_voice
+# ---------------------------------------------------------------------------
+# Session + impact tracking (in-memory; resets on server restart)
+# ---------------------------------------------------------------------------
+_user_sessions: dict[str, dict] = {}   # session_key -> {session_id, status, ...}
+_completed_forms: dict[str, dict] = {} # session_id -> {form_type, form_data, ref, timestamp}
 
-# ── Feature Flags ────────────────────────────────────────────
-USE_V3 = os.getenv("USE_V3_GRAPH", "true").lower() in ("true", "1", "yes")
+class ImpactStats(TypedDict):
+    forms_filled: int
+    schemes_discovered: int
+    otp_handled: int
+    voice_notes_processed: int
+    users_served: set[str]
 
-# ── Twilio Config (for direct API sends) ────────────────────
-_TWILIO_SID   = os.getenv("TWILIO_ACCOUNT_SID", "")
-_TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
-_TWILIO_FROM  = os.getenv("TWILIO_WHATSAPP_NUMBER", "whatsapp:+14155238886")
 
-
-async def _send_whatsapp(to_phone: str, message: str) -> None:
-    """Send a WhatsApp message directly via Twilio REST API (not TwiML)."""
-    if not _TWILIO_SID or not _TWILIO_TOKEN:
-        print(f"[WhatsApp] (mock) → {to_phone}: {message[:80]}")
-        return
-    to = f"whatsapp:{to_phone}" if not to_phone.startswith("whatsapp:") else to_phone
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"https://api.twilio.com/2010-04-01/Accounts/{_TWILIO_SID}/Messages.json",
-                auth=(_TWILIO_SID, _TWILIO_TOKEN),
-                data={"From": _TWILIO_FROM, "To": to, "Body": message},
-            )
-            if resp.status_code not in (200, 201):
-                print(f"[WhatsApp] ⚠️ Twilio HTTP {resp.status_code} for {to_phone}: {resp.text[:200]}")
-            else:
-                sid_sent = resp.json().get("sid", "?")
-                print(f"[WhatsApp] ✅ Sent to {to_phone} (sid={sid_sent})")
-    except Exception as e:
-        print(f"[WhatsApp] ⚠️ Could not send to {to_phone}: {e}")
-
-# ── Session tracker ──────────────────────────────────────────
-_user_sessions: dict[str, dict] = {}  # phone → {session_id, created_at, ...}
-
-# ── Impact tracker (in-memory, persists to DB) ───────────────
-_impact = {
+_impact: ImpactStats = {
     "forms_filled": 0,
     "schemes_discovered": 0,
     "otp_handled": 0,
     "voice_notes_processed": 0,
     "users_served": set(),
-    "districts": set(),
 }
 
-# ── Initialize FastAPI ───────────────────────────────────────
+# ---------------------------------------------------------------------------
+# FastAPI App
+# ---------------------------------------------------------------------------
 app = FastAPI(
-    title="GramSetu v3 — Autonomous WhatsApp Agent",
-    description="AI agent that fills government forms for rural India. "
-                "DigiLocker auto-fill, vision-based portal navigation, "
-                "OTP suspend/resume, scheme discovery.",
+    title="GramSetu v3 -- AI Government Forms Assistant",
+    description=(
+        "AI agent that fills Indian government forms via web chat. "
+        "Supports text, voice, OTP handling, DigiLocker auto-fill, "
+        "scheme discovery, and 11 Indian languages."
+    ),
     version="3.0",
 )
 
@@ -112,103 +86,119 @@ app.add_middleware(
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+STATIC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-# ── Shutdown ─────────────────────────────────────────────────
-@app.on_event("shutdown")
-async def shutdown():
-    """Notify all active WhatsApp users that the server is closing."""
-    if not _user_sessions:
-        return
-    print("[Server] 🔴 Sending shutdown notice to active users...")
-    shutdown_hi = (
-        "⚠️ *GramSetu सर्वर बंद हो रहा है*\n\n"
-        "हमारा सर्वर अभी बंद हो गया है। कृपया कुछ देर बाद पुनः प्रयास करें।\n"
-        "आपका डेटा सुरक्षित है। 🙏"
-    )
-    shutdown_en = (
-        "⚠️ *GramSetu Server Closed*\n\n"
-        "The server has been shut down. Please try again after some time.\n"
-        "Your data is safe. 🙏"
-    )
-    tasks = []
-    for phone in list(_user_sessions.keys()):
-        msg = shutdown_hi  # default Hindi for rural users
-        tasks.append(_send_whatsapp(phone, msg))
-    if tasks:
-        await asyncio.gather(*tasks, return_exceptions=True)
-    print(f"[Server] 🔴 Shutdown notice sent to {len(tasks)} users.")
-
-
-# ── Startup ──────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup():
-    import sys
-    # Ensure UTF-8 output on Windows
     if sys.stdout.encoding != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     db.init_db()
-    v = "v3 (LangGraph)" if USE_V3 else "v2 (Legacy)"
-    print("\n" + "=" * 62)
-    print(f"  🌾 GramSetu {v} — Production Server")
-    print("=" * 62)
-    print(f"  🌐 API Docs:    http://localhost:{os.getenv('PORT', 8000)}/docs")
-    print(f"  💬 Chat:        POST /api/chat")
-    print(f"  📱 WhatsApp:    POST /webhook")
-    print(f"  🔐 OTP:         POST /api/otp/{{user_id}}")
-    print(f"  🎯 Schemes:     POST /api/schemes")
-    print(f"  📊 Impact:      GET  /api/impact")
-    print(f"  🔊 TTS:         POST /api/tts")
-    print(f"  📈 Dashboard:   streamlit run dashboard/app.py")
-    print("=" * 62 + "\n")
+
+    from backend.llm_client import _groq_ok, _nim_ok, GROQ_MODEL_MAIN
+    groq_status   = "OK Groq"   if _groq_ok() else "NO KEY Groq"
+    nvidia_status = "OK NVIDIA" if _nim_ok()  else "NO KEY NVIDIA"
+    port = os.getenv("PORT", "8000")
+
+    print("\n" + "=" * 60)
+    print("  GramSetu v3 -- Web API Server")
+    print("=" * 60)
+    print(f"  LLM:        {groq_status} ({GROQ_MODEL_MAIN})")
+    print(f"  Vision/ASR: {nvidia_status}")
+    print(f"  ASR:        Groq whisper-large-v3 -> NVIDIA parakeet")
+    print(f"  TTS:        edge-tts (11 Indian languages, free)")
+    print(f"  DigiLocker: Mock (see DIGILOCKER_INTEGRATION.md for real API)")
+    print(f"  Gov Portal: Mock (Playwright)")
+    print("-" * 60)
+    print(f"  API Docs:   http://localhost:{port}/docs")
+    print(f"  Chat:       POST /api/chat")
+    print(f"  Voice:      POST /api/voice")
+    print(f"  OTP:        POST /api/otp/{{user_id}}")
+    print(f"  Schemes:    POST /api/schemes")
+    print(f"  Impact:     GET  /api/impact")
+    print("=" * 60 + "\n")
+
+    _start_mcp_servers()
 
 
-# ============================================================
-# CORE: Process message through v3 pipeline
-# ============================================================
+def _start_mcp_servers():
+    """Start all 4 MCP tool servers as background daemon threads."""
+    import threading
 
-async def _process(user_id: str, phone: str, message: str,
-                   message_type: str = "text", form_type: str = "") -> dict:
-    """Route to v3 LangGraph or v2 legacy pipeline with security."""
+    mcp_configs = [
+        ("WhatsApp",   "backend.mcp_servers.whatsapp_mcp",   int(os.getenv("MCP_WHATSAPP_PORT",   "8100"))),
+        ("Audit",      "backend.mcp_servers.audit_mcp",      int(os.getenv("MCP_AUDIT_PORT",      "8102"))),
+        ("Browser",    "backend.mcp_servers.browser_mcp",    int(os.getenv("MCP_BROWSER_PORT",    "8101"))),
+        ("DigiLocker", "backend.mcp_servers.digilocker_mcp", int(os.getenv("MCP_DIGILOCKER_PORT", "8103"))),
+    ]
 
-    # Sanitize input
+    def _run_mcp(name: str, module: str, port: int):
+        try:
+            import importlib
+            mod = importlib.import_module(module)
+            mcp_server = getattr(mod, "mcp", None)
+            if mcp_server and hasattr(mcp_server, "run"):
+                print(f"[MCP] {name} starting on :{port}")
+                mcp_server.run(transport="streamable-http", host="127.0.0.1", port=port)
+        except Exception as e:
+            print(f"[MCP] {name} failed: {e}")
+
+    for name, module, port in mcp_configs:
+        threading.Thread(target=_run_mcp, args=(name, module, port), daemon=True).start()
+
+    print("[MCP] 4 servers: WhatsApp :8100 | Browser :8101 | Audit :8102 | DigiLocker :8103")
+
+
+# ---------------------------------------------------------------------------
+# Core: run a message through the v3 LangGraph pipeline
+# ---------------------------------------------------------------------------
+async def _process(
+    user_id: str, phone: str, message: str,
+    message_type: str = "text", form_type: str = "",
+) -> dict:
+    import time
+
     message = sanitize_input(message)
+    session = _user_sessions.get(phone, {})
+    lang = detect_language(message) if message else "hi"
 
-    if USE_V3:
-        session = _user_sessions.get(phone, {})
-        session_id = session.get("session_id")
-        lang = detect_language(message) if message else "hi"
+    result = await v3_process_message(
+        user_id=user_id, user_phone=phone, message=message,
+        message_type=message_type, language=lang,
+        form_type=form_type, session_id=session.get("session_id"),
+    )
 
-        result = await v3_process_message(
-            user_id=user_id, user_phone=phone, message=message,
-            message_type=message_type, language=lang,
-            form_type=form_type, session_id=session_id,
-        )
+    _user_sessions[phone] = {
+        "session_id": result.get("session_id", session.get("session_id")),
+        "created_at": session.get("created_at", time.time()),
+        "last_active": time.time(),
+        "status": result.get("status", ""),
+    }
 
-        # Track session
-        import time
-        _user_sessions[phone] = {
-            "session_id": result.get("session_id", session_id),
-            "created_at": session.get("created_at", time.time()),
-            "last_active": time.time(),
-            "status": result.get("status", ""),
-        }
+    _impact["users_served"].add(phone)
+    if result.get("status") == GraphStatus.COMPLETED.value:
+        _impact["forms_filled"] += 1
+        # Store completed form for receipt generation
+        sid = result.get("session_id", session.get("session_id", ""))
+        if sid and result.get("form_data"):
+            _completed_forms[sid] = {
+                "form_type":       result.get("form_type", ""),
+                "form_data":       result.get("form_data", {}),
+                "reference_number": result.get("reference_number", ""),
+                "timestamp":       __import__("datetime").datetime.now().isoformat(),
+                "user_id":         user_id,
+            }
+    if message_type == "otp":
+        _impact["otp_handled"] += 1
+    if message_type == "voice":
+        _impact["voice_notes_processed"] += 1
 
-        # Track impact
-        _impact["users_served"].add(phone)
-        if result.get("status") == GraphStatus.COMPLETED.value:
-            _impact["forms_filled"] += 1
-        if message_type == "otp":
-            _impact["otp_handled"] += 1
-        if message_type == "voice":
-            _impact["voice_notes_processed"] += 1
-
-        _log_to_db(user_id, phone, message, result, message_type)
-        return result
-    else:
-        return v2_process_message(user_id, phone, message, message_type)
+    _log_to_db(user_id, phone, message, result, message_type)
+    return result
 
 
 def _log_to_db(user_id, phone, message, result, message_type):
@@ -221,209 +211,12 @@ def _log_to_db(user_id, phone, message, result, message_type):
             message_type=message_type,
         )
     except Exception as e:
-        print(f"[DB] ⚠️ {e}")
+        print(f"[DB] {e}")
 
 
-# ============================================================
-# TWILIO WHATSAPP WEBHOOK (with security)
-# ============================================================
-
-_THINKING_MSGS = {
-    "hi": "⏳ *GramSetu सोच रहा है...*\nआपका संदेश मिल गया। बस एक पल!",
-    "ta": "⏳ *GramSetu யோசிக்கிறது...*\nஉங்கள் செய்தி கிடைத்தது. ஒரு நிமிடம்!",
-    "te": "⏳ *GramSetu ఆలోచిస్తోంది...*\nమీ సందేశం అందింది. ఒక్క క్షణం!",
-    "bn": "⏳ *GramSetu ভাবছে...*\nআপনার বার্তা পেয়েছি। একটু অপেক্ষা করুন!",
-    "mr": "⏳ *GramSetu विचार करत आहे...*\nतुमचा संदेश मिळाला. एक क्षण!",
-    "en": "⏳ *GramSetu is thinking...*\nGot your message. Just a moment!",
-}
-
-_ERROR_MSGS = {
-    "hi": "❌ *कुछ गड़बड़ हो गई।*\nकृपया दोबारा भेजें या कुछ देर बाद प्रयास करें।\n\nसमस्या बनी रहे तो *0* भेजकर नए सिरे से शुरू करें।",
-    "ta": "❌ *பிழை ஏற்பட்டது.*\nமீண்டும் அனுப்பவும் அல்லது சிறிது நேரம் கழித்து முயற்சிக்கவும்.\n\n*0* அனுப்பி மறுதொடக்கம் செய்யலாம்.",
-    "te": "❌ *లోపం సంభవించింది.*\nదయచేసి మళ్ళీ పంపండి లేదా కొంత సేపు తర్వాత ప్రయత్నించండి.\n\n*0* పంపి మళ్ళీ మొదలుపెట్టండి.",
-    "bn": "❌ *একটি ত্রুটি ঘটেছে।*\nঅনুগ্রহ করে আবার পাঠান বা কিছুক্ষণ পরে চেষ্টা করুন।\n\n*0* পাঠিয়ে নতুন করে শুরু করুন।",
-    "mr": "❌ *काहीतरी चुकले.*\nकृपया पुन्हा पाठवा किंवा थोड्या वेळाने प्रयत्न करा.\n\n*0* पाठवून नव्याने सुरू करा.",
-    "en": "❌ *Something went wrong.*\nPlease try sending again or wait a moment.\n\nSend *0* to start fresh.",
-}
-
-
-async def _process_and_reply(
-    phone: str,
-    user_id: str,
-    message_text: str,
-    message_type: str,
-    media_url: str = "",
-    media_content_type: str = "",
-    detected_lang: str = "hi",
-):
-    """
-    Background task:
-      1. Send instant "thinking" indicator to user
-      2. Download + transcribe voice if needed (async, not blocking)
-      3. Run the full LangGraph pipeline
-      4. Send real reply (or localized error on failure)
-    """
-    import time
-    t0 = time.time()
-
-    # ── 1. Instant "thinking" indicator ─────────────────────
-    thinking_msg = _THINKING_MSGS.get(detected_lang, _THINKING_MSGS["hi"])
-    await _send_whatsapp(phone, thinking_msg)
-
-    # ── 2. Download + transcribe voice (async, non-blocking) ─
-    if message_type == "voice" and media_url:
-        twilio_sid   = os.getenv("TWILIO_ACCOUNT_SID", "")
-        twilio_token = os.getenv("TWILIO_AUTH_TOKEN", "")
-        audio_path = await download_audio_async(media_url, twilio_sid, twilio_token)
-        if audio_path:
-            try:
-                message_text = await asyncio.to_thread(
-                    transcribe_audio, audio_path, detected_lang
-                )
-            finally:
-                await asyncio.to_thread(cleanup_audio, audio_path)
-        else:
-            message_text = ""
-
-        if not message_text:
-            await _send_whatsapp(phone, (
-                "🎤 आवाज़ नहीं सुनाई दी। कृपया टेक्स्ट में भेजें।"
-                if detected_lang == "hi" else
-                "🎤 Could not process voice note. Please send as text."
-            ))
-            return
-
-    # ── 3. Run the pipeline ──────────────────────────────────
-    try:
-        result = await _process(user_id, phone, message_text, message_type)
-        reply = result.get("response", "").strip()
-        elapsed = round((time.time() - t0) * 1000)
-        print(f"[WhatsApp] 📤 {phone} ({elapsed}ms): {reply[:80] if reply else '(empty — sending fallback)'}")
-
-        # Safety net: if graph returned no response (should never happen), send menu
-        if not reply:
-            reply = (
-                "\u26a0️ *GramSetu* — namaskar! Kuch samasya aayi.\n"
-                "Please try again or send *0* to reset.\n\n"
-                "*0* — naye sire se shuru karein"
-                if detected_lang != "hi" else
-                "⚠️ *GramSetu* — नमस्कार! कुछ समस्या आई.\n"
-                "कृपया दोबारा भेजें या *0* भेजकर नए सिरे से शुरू करें."
-            )
-
-        await _send_whatsapp(phone, reply)
-    except Exception as e:
-        import traceback
-        print(f"[WhatsApp] ⚠️ Error for {phone}: {e}")
-        traceback.print_exc()
-        error_msg = _ERROR_MSGS.get(detected_lang, _ERROR_MSGS["hi"])
-        await _send_whatsapp(phone, error_msg)
-
-
-@app.post("/webhook")
-async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks):
-    """
-    Twilio WhatsApp Webhook.
-
-    For text messages: process synchronously and reply inline via TwiML.
-    This GUARANTEES delivery — no Twilio REST API, no ngrok issues.
-
-    For voice: background task (download is slow), then REST API reply.
-    """
-    try:
-        form_data = await request.form()
-    except Exception:
-        return HTMLResponse(content=str(MessagingResponse()), media_type="application/xml")
-
-    from_number = form_data.get("From", "")
-    phone = from_number.replace("whatsapp:", "")
-
-    # ── Twilio Signature Validation ──────────────────────────
-    try:
-        signature  = request.headers.get("X-Twilio-Signature", "")
-        proto      = request.headers.get("X-Forwarded-Proto", request.url.scheme)
-        host       = request.headers.get("X-Forwarded-Host", request.url.netloc)
-        canon_url  = f"{proto}://{host}{request.url.path}"
-        params     = {k: v for k, v in form_data.items()}
-
-        if not validate_twilio_signature(canon_url, params, signature):
-            print(f"[Security] ⛔ Invalid Twilio signature from {phone}")
-            raise HTTPException(status_code=403, detail="Invalid signature")
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"[Security] ⚠️ Signature validation error: {e} — allowing request")
-
-    # ── Rate Limiting ────────────────────────────────────────
-    if not webhook_limiter.is_allowed(phone):
-        resp = MessagingResponse()
-        resp.message("⚠️ Too many messages. Please wait a minute.")
-        return HTMLResponse(content=str(resp), media_type="application/xml")
-
-    # ── Extract fields ────────────────────────────────────────
-    body               = form_data.get("Body", "") or ""
-    num_media          = int(form_data.get("NumMedia", 0))
-    media_url          = form_data.get("MediaUrl0", "") if num_media > 0 else ""
-    media_content_type = form_data.get("MediaContentType0", "") if num_media > 0 else ""
-    user_id            = phone
-    message_text       = body or "hello"
-    message_type       = "text"
-
-    detected_lang = detect_language(body) if body.strip() else "hi"
-
-    if num_media > 0 and "audio" in media_content_type:
-        message_type = "voice"
-
-    # ── OTP check ────────────────────────────────────────────
-    session = _user_sessions.get(phone, {})
-    if session.get("status") == GraphStatus.WAIT_OTP.value and message_type == "text":
-        otp = validate_otp_input(message_text)
-        if otp:
-            message_text = otp
-            message_type = "otp"
-
-    print(f"[WhatsApp] 📨 {phone} [{detected_lang}] {message_type}: {message_text[:60]}")
-
-    # ── Voice: background task (download is slow) ────────────
-    if message_type == "voice":
-        background_tasks.add_task(
-            _process_and_reply,
-            phone, user_id, message_text, message_type,
-            media_url, media_content_type, detected_lang,
-        )
-        resp = MessagingResponse()
-        resp.message(_THINKING_MSGS.get(detected_lang, _THINKING_MSGS["hi"]))
-        return HTMLResponse(content=str(resp), media_type="application/xml")
-
-    # ── Text / OTP: process synchronously + reply in TwiML ───
-    try:
-        result = await _process(user_id, phone, message_text, message_type)
-        reply = result.get("response", "").strip()
-
-        if not reply:
-            reply = (
-                "⚠️ GramSetu — कुछ समस्या आई। *0* भेजें और नए सिरे से शुरू करें।"
-                if detected_lang == "hi" else
-                "⚠️ GramSetu — something went wrong. Send *0* to start over."
-            )
-
-        print(f"[WhatsApp] 📤 {phone} → TwiML reply: {reply[:80]}")
-        _log_to_db(user_id, phone, message_text, result, message_type)
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        reply = _ERROR_MSGS.get(detected_lang, _ERROR_MSGS["hi"])
-
-    resp = MessagingResponse()
-    resp.message(reply)
-    return HTMLResponse(content=str(resp), media_type="application/xml")
-
-
-# ============================================================
-# REST CHAT API (with rate limiting)
-# ============================================================
-
+# ---------------------------------------------------------------------------
+# CHAT -- main entry point for the web app
+# ---------------------------------------------------------------------------
 @app.post("/api/chat")
 async def chat_api(request: Request):
     client_ip = request.client.host if request.client else "unknown"
@@ -435,279 +228,218 @@ async def chat_api(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    message = body.get("message", "")
-    user_id = body.get("user_id", "test-user")
-    phone = body.get("phone", "") or ""
+    message   = body.get("message", "")
+    user_id   = body.get("user_id", "web-user")
+    phone     = body.get("phone", "") or ""
     form_type = body.get("form_type", "")
 
-    # Key fix: web users don't have a real phone number.
-    # Falling back to '9999999999' caused ALL web users to share one session.
-    # Use user_id as the session key when no real phone is provided.
+    # Web users don't have a real phone — use user_id as the session key
     if not phone or phone in ("9999999999", "test", "0"):
         phone = user_id
 
     if not message:
-        raise HTTPException(status_code=400, detail="'message' required")
+        raise HTTPException(status_code=400, detail="'message' is required")
 
     result = await _process(user_id, phone, message, "text", form_type)
 
-    # Build screenshot URL — prefer base64 data URI (no file on disk required → no 404)
+    # Build screenshot URL — _format_result already pops from cache into result
     screenshot_url = None
-    # Check module-level cache FIRST (most reliable source)
-    try:
-        from backend.agents.graph import _screenshot_cache as _ss_cache
-        _cached_b64 = _ss_cache.get(result.get("session_id", ""), "")
-    except Exception:
-        _cached_b64 = ""
-    b64 = _cached_b64 or result.get("screenshot_b64", "")
+    b64 = result.get("screenshot_b64", "")
     if b64:
-        # Inline data URI: always available immediately, no separate HTTP request
         screenshot_url = f"data:image/png;base64,{b64}"
-    elif (result.get("status") == "wait_otp" and result.get("current_node") == "fill_form"
-            and result.get("session_id") and result.get("form_type")):
-        # Legacy fallback: file-based URL (only if the file was actually written)
-        fp = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "data", "screenshots",
-            f"{result['form_type']}_{result['session_id']}.png",
-        )
-        if os.path.exists(fp):
-            screenshot_url = f"/api/screenshot/{result['form_type']}/{result['session_id']}"
 
     return JSONResponse({
-        "success": True,
-        "response": result["response"],
-        "status": result.get("status", ""),
-        "session_id": result.get("session_id", ""),
-        "current_node": result.get("current_node", ""),
-        "language": result.get("language", "hi"),
-        "form_type": result.get("form_type", ""),
-        "form_data": result.get("form_data", {}),
-        "confidence_scores": result.get("confidence_scores", {}),
-        "missing_fields": result.get("missing_fields", []),
-        "screenshot_url": screenshot_url,
-        "digilocker_auth_status": result.get("digilocker_auth_status", None),
+        "success":               True,
+        "response":              result["response"],
+        "status":                result.get("status", ""),
+        "session_id":            result.get("session_id", ""),
+        "current_node":          result.get("current_node", ""),
+        "language":              result.get("language", "hi"),
+        "form_type":             result.get("form_type", ""),
+        "form_data":             result.get("form_data", {}),
+        "confidence_scores":     result.get("confidence_scores", {}),
+        "missing_fields":        result.get("missing_fields", []),
+        "screenshot_url":        screenshot_url,
+        "digilocker_auth_status": result.get("digilocker_auth_status"),
+        "receipt_url": (
+            f"/api/receipt/{result['session_id']}"
+            if result.get("receipt_ready") and result.get("session_id")
+            else None
+        ),
     })
 
 
-# ============================================================
+# ---------------------------------------------------------------------------
 # OTP RESUME
-# ============================================================
-
+# ---------------------------------------------------------------------------
 @app.post("/api/otp/{user_id}")
 async def resume_with_otp(user_id: str, request: Request):
-    if not USE_V3:
-        raise HTTPException(status_code=400, detail="v3 mode required")
-
+    """Resume a form fill that was paused waiting for an OTP."""
     body = await request.json()
-    raw_otp = body.get("otp", "")
-    otp = validate_otp_input(raw_otp)
+    otp = validate_otp_input(body.get("otp", ""))
     if not otp:
         raise HTTPException(status_code=400, detail="Invalid OTP (4-6 digits required)")
-
     result = await _process(user_id, user_id, otp, "otp")
-    return JSONResponse({
-        "success": True, "response": result["response"],
-        "status": result.get("status", ""),
-    })
+    return JSONResponse({"success": True, "response": result["response"], "status": result.get("status", "")})
 
 
-# ============================================================
+# ---------------------------------------------------------------------------
+# VOICE INPUT
+# ---------------------------------------------------------------------------
+@app.post("/api/voice")
+async def voice_input(request: Request):
+    """Upload a WebM/WAV audio file, get back the transcribed text."""
+    content_type = request.headers.get("content-type", "")
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        audio_file = form.get("audio")
+        if not isinstance(audio_file, UploadFile):
+            raise HTTPException(status_code=400, detail="'audio' field required")
+        audio_bytes = await audio_file.read()
+    else:
+        audio_bytes = await request.body()
+
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio")
+
+    voice_cache_dir = os.path.join(STATIC_DIR, "data", "voice_cache")
+    os.makedirs(voice_cache_dir, exist_ok=True)
+    suffix = ".webm" if b"webm" in audio_bytes[:32] else ".wav"
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=voice_cache_dir)
+    tmp.write(audio_bytes)
+    tmp.close()
+
+    try:
+        text = await asyncio.to_thread(transcribe_audio, tmp.name, "hi")
+    except Exception:
+        text = ""
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except Exception:
+            pass
+
+    if not text:
+        return JSONResponse({"text": "", "language_detected": "hi", "confidence": 0.0})
+    return JSONResponse({"text": text, "language_detected": detect_language(text), "confidence": 0.85})
+
+
+# ---------------------------------------------------------------------------
 # SCHEME DISCOVERY
-# ============================================================
-
+# ---------------------------------------------------------------------------
 @app.post("/api/schemes")
 async def discover_user_schemes(request: Request):
-    """
-    Find all schemes a user is eligible for.
-    Send: {"age": 65, "gender": "male", "income": 80000, "occupation": "farmer"}
+    """Find all schemes a user is eligible for.
+    Body: {"age": 65, "gender": "male", "income": 80000, "occupation": "farmer", "language": "hi"}
     """
     body = await request.json()
     lang = body.get("language", "hi")
-
     try:
         result = await discover_schemes(
-            age=body.get("age"),
-            gender=body.get("gender"),
-            income=body.get("income"),
-            occupation=body.get("occupation"),
+            age=body.get("age"), gender=body.get("gender"),
+            income=body.get("income"), occupation=body.get("occupation"),
             language=lang,
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Scheme discovery failed. Please try again. ({e})",
-        )
+        raise HTTPException(status_code=500, detail=f"Scheme discovery failed: {e}")
 
     _impact["schemes_discovered"] += result["count"]
-
-    schemes_payload = []
+    schemes = []
     for idx, s in enumerate(result.get("eligible", []), start=1):
         name = s.get(f"name_{lang}") or s.get("name") or s.get("name_en") or "Unknown Scheme"
-        schemes_payload.append({
-            "id": s.get("id", f"scheme_{idx}"),
-            "name": name,
-            "benefit": s.get("benefit", ""),
-            "emoji": s.get("emoji", "📋"),
-        })
-
-    return JSONResponse({
-        "count": result["count"],
-        "message": result["message"],
-        "schemes": schemes_payload,
-    })
+        schemes.append({"id": s.get("id", f"scheme_{idx}"), "name": name,
+                        "benefit": s.get("benefit", ""), "emoji": s.get("emoji", "📋")})
+    return JSONResponse({"count": result["count"], "message": result["message"], "schemes": schemes})
 
 
-# ============================================================
+# ---------------------------------------------------------------------------
 # DIGILOCKER OAUTH CALLBACK
-# ============================================================
-
+# ---------------------------------------------------------------------------
 @app.get("/callback/digilocker")
 async def digilocker_callback(code: str = "", state: str = "", error: str = ""):
-    """
-    DigiLocker redirects here after user grants permission.
-    Exchanges auth code for access token, then fetches documents.
-    """
+    """DigiLocker redirects here after the user grants document access."""
     if error:
-        return HTMLResponse(
-            "<h1>❌ DigiLocker Authorization Failed</h1>"
-            f"<p>Error: {error}</p>"
-            "<p>Please go back to WhatsApp and try again.</p>"
-        )
-
+        return HTMLResponse(f"<h1>DigiLocker Authorization Failed</h1><p>Error: {error}</p>")
     if not code or not state:
-        return HTMLResponse(
-            "<h1>⚠️ Missing Parameters</h1>"
-            "<p>Please use the link sent on WhatsApp.</p>"
-        )
+        return HTMLResponse("<h1>Missing Parameters</h1>")
 
-    # Exchange code for token (in production)
-    from backend.mcp_servers.digilocker_mcp import _auth_sessions
+    from backend.mcp_servers.digilocker_mcp import _auth_sessions, _get_demo_data
     session = _auth_sessions.get(state)
-
     if session:
-        session["status"] = "completed"
+        session["status"]    = "completed"
         session["auth_code"] = code
+        session["data"]      = _get_demo_data(session.get("form_type", "ration_card"))
+        # TODO (real API): exchange `code` for access_token here
+        # See DIGILOCKER_INTEGRATION.md for the full OAuth flow
 
-        # In production: exchange code for access_token here
-        # For now: mark as ready with demo data
-        from backend.mcp_servers.digilocker_mcp import _get_demo_data
-        form_type = session.get("form_type", "ration_card")
-        session["data"] = _get_demo_data(form_type)
-
-    return HTMLResponse(
-        """
-        <html>
-        <head><style>
-            body { font-family: 'Segoe UI', sans-serif; text-align: center;
-                   padding: 60px 20px; background: #0d1117; color: #e6edf3; }
-            .card { background: #161b22; border-radius: 16px; padding: 40px;
-                    max-width: 400px; margin: 0 auto; border: 1px solid #30363d; }
-            h1 { color: #58a6ff; font-size: 28px; }
-            p { color: #8b949e; font-size: 16px; line-height: 1.6; }
-            .check { font-size: 64px; }
-        </style></head>
-        <body>
-            <div class="card">
-                <div class="check">✅</div>
-                <h1>DigiLocker Connected!</h1>
-                <p>Your data has been fetched successfully.<br>
-                   Go back to <strong>WhatsApp</strong> — your form is ready!</p>
-                <p style="margin-top: 30px; font-size: 14px; color: #484f58;">
-                    🔒 Your data is encrypted and never stored permanently.
-                </p>
-            </div>
-        </body>
-        </html>
-        """
-    )
+    return HTMLResponse("""<html><head><style>
+        body{font-family:'Segoe UI',sans-serif;text-align:center;padding:60px 20px;background:#0d1117;color:#e6edf3}
+        .card{background:#161b22;border-radius:16px;padding:40px;max-width:400px;margin:0 auto;border:1px solid #30363d}
+        h1{color:#58a6ff} p{color:#8b949e;line-height:1.6}
+    </style></head><body><div class="card">
+        <div style="font-size:64px">OK</div>
+        <h1>DigiLocker Connected!</h1>
+        <p>Your documents have been fetched. Go back to the app -- your form is ready!</p>
+        <p style="font-size:14px;color:#484f58;margin-top:24px">Your data is encrypted and never stored permanently.</p>
+    </div></body></html>""")
 
 
-# ============================================================
-# VOICE TTS
-# ============================================================
-
+# ---------------------------------------------------------------------------
+# TTS
+# ---------------------------------------------------------------------------
 @app.post("/api/tts")
 async def generate_voice(request: Request):
-    """Generate voice reply. Send: {"text": "...", "language": "hi"}"""
+    """Generate TTS audio. Body: {"text": "...", "language": "hi"}"""
     body = await request.json()
     text = body.get("text", "")
     lang = body.get("language", "hi")
-
     if not text:
-        raise HTTPException(status_code=400, detail="'text' required")
-
+        raise HTTPException(status_code=400, detail="'text' is required")
     filepath = await text_to_speech(text, lang)
     if filepath and os.path.exists(filepath):
         return FileResponse(filepath, media_type="audio/mpeg", filename="reply.mp3")
-
     raise HTTPException(status_code=500, detail="TTS generation failed")
 
 
-# ============================================================
-# APPLICATION STATUS TRACKER
-# ============================================================
-
+# ---------------------------------------------------------------------------
+# APPLICATION STATUS (demo -- in production use browser_mcp to scrape portal)
+# ---------------------------------------------------------------------------
 @app.post("/api/status")
 async def check_application_status(request: Request):
-    """
-    Check application status. Send: {"user_id": "...", "form_type": "ration_card"}
-    In production: scrapes the portal status page.
-    """
     body = await request.json()
-    user_id = body.get("user_id", "")
     form_type = body.get("form_type", "")
     lang = body.get("language", "hi")
-
-    # Demo response (in production: use browser_mcp to check portal)
     status_map = {
-        "ration_card": ("Under Review", "15 दिन", "15 days"),
-        "pension": ("Approved", "अगले महीने से", "from next month"),
-        "identity": ("Processing", "7 दिन", "7 days"),
+        "ration_card": ("Under Review", "15 din", "15 days"),
+        "pension":     ("Approved",     "agle mahine se", "from next month"),
+        "identity":    ("Processing",   "7 din", "7 days"),
     }
     status, time_hi, time_en = status_map.get(form_type, ("Unknown", "N/A", "N/A"))
-
     if lang == "hi":
-        message = (
-            f"📋 *आवेदन की स्थिति*\n\n"
-            f"📝 फ़ॉर्म: {form_type.replace('_', ' ').title()}\n"
-            f"🔄 स्थिति: *{status}*\n"
-            f"⏳ अनुमानित समय: {time_hi}\n\n"
-            f"🔔 SMS पर अपडेट आएगा।"
-        )
+        msg = f"Aawedan ki sthiti\n\nForm: {form_type}\nSthiti: {status}\nSamay: {time_hi}"
     else:
-        message = (
-            f"📋 *Application Status*\n\n"
-            f"📝 Form: {form_type.replace('_', ' ').title()}\n"
-            f"🔄 Status: *{status}*\n"
-            f"⏳ Estimated time: {time_en}\n\n"
-            f"🔔 Updates will come via SMS."
-        )
-
-    return JSONResponse({"status": status, "message": message})
+        msg = f"Application Status\n\nForm: {form_type}\nStatus: {status}\nTime: {time_en}"
+    return JSONResponse({"status": status, "message": msg})
 
 
-# ============================================================
-# IMPACT DASHBOARD
-# ============================================================
-
+# ---------------------------------------------------------------------------
+# IMPACT METRICS
+# ---------------------------------------------------------------------------
 @app.get("/api/impact")
 async def get_impact():
-    """Public impact metrics for the impact dashboard."""
     return JSONResponse({
-        "forms_filled": _impact["forms_filled"],
-        "schemes_discovered": _impact["schemes_discovered"],
-        "otp_handled": _impact["otp_handled"],
+        "forms_filled":          _impact["forms_filled"],
+        "schemes_discovered":    _impact["schemes_discovered"],
+        "otp_handled":           _impact["otp_handled"],
         "voice_notes_processed": _impact["voice_notes_processed"],
-        "users_served": len(_impact["users_served"]),
-        "active_sessions": len(_user_sessions),
+        "users_served":          len(_impact["users_served"]),
+        "active_sessions":       len(_user_sessions),
     })
 
 
-# ============================================================
-# EXISTING DASHBOARD ENDPOINTS (v2 compatible)
-# ============================================================
-
+# ---------------------------------------------------------------------------
+# DB / ADMIN ENDPOINTS
+# ---------------------------------------------------------------------------
 @app.get("/api/logs")
 async def get_logs(limit: int = 100):
     return JSONResponse(db.get_audit_logs(limit))
@@ -727,7 +459,6 @@ async def get_pending():
 @app.get("/api/stats")
 async def get_stats():
     stats = db.get_stats()
-    stats["version"] = "v3" if USE_V3 else "v2"
     stats["active_sessions"] = len(_user_sessions)
     return JSONResponse(stats)
 
@@ -735,35 +466,33 @@ async def get_stats():
 async def confirm_submission(submission_id: int, request: Request):
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     db.confirm_submission(submission_id, body.get("notes", ""))
-    return JSONResponse({"success": True, "message": f"Submission {submission_id} confirmed"})
+    return JSONResponse({"success": True})
 
 @app.post("/api/reject/{submission_id}")
 async def reject_submission(submission_id: int, request: Request):
     body = await request.json() if request.headers.get("content-type") == "application/json" else {}
     db.reject_submission(submission_id, body.get("notes", ""))
-    return JSONResponse({"success": True, "message": f"Submission {submission_id} rejected"})
+    return JSONResponse({"success": True})
 
 
-# ── Graph State (debug) ─────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# GRAPH STATE (debug)
+# ---------------------------------------------------------------------------
 @app.get("/api/graph/state/{user_id}")
 async def get_graph_state(user_id: str):
     session = _user_sessions.get(user_id, {})
     if not session.get("session_id"):
         return JSONResponse({"state": None, "message": "No active session"})
-
     try:
         from backend.agents.graph import get_compiled_graph
-        compiled = get_compiled_graph()
-        config = {"configurable": {"thread_id": session["session_id"]}}
-        snapshot = compiled.get_state(config)
+        snapshot = get_compiled_graph().get_state({"configurable": {"thread_id": session["session_id"]}})
         if snapshot and snapshot.values:
             s = snapshot.values
             return JSONResponse({"state": {
-                "session_id": s.get("session_id"),
-                "status": s.get("status"),
-                "current_node": s.get("current_node"),
-                "form_type": s.get("form_type"),
+                "session_id":    s.get("session_id"),
+                "status":        s.get("status"),
+                "current_node":  s.get("current_node"),
+                "form_type":     s.get("form_type"),
                 "missing_fields": s.get("missing_fields", []),
             }})
     except Exception as e:
@@ -771,222 +500,267 @@ async def get_graph_state(user_id: str):
     return JSONResponse({"state": None})
 
 
-# ── Health Check ─────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# HEALTH
+# ---------------------------------------------------------------------------
 @app.get("/api/health")
 async def health():
-    from agent_core.nims_client import is_nim_available
+    from backend.llm_client import _groq_ok, _nim_ok
     return JSONResponse({
-        "status": "ok",
-        "version": "v3" if USE_V3 else "v2",
-        "nvidia_nim": "connected" if is_nim_available() else "fallback_mode",
-        "graph_engine": "langgraph" if USE_V3 else "legacy",
+        "status":          "ok",
+        "version":         "v3",
+        "groq":            "configured" if _groq_ok() else "missing_key",
+        "nvidia":          "configured" if _nim_ok()  else "missing_key",
+        "graph_engine":    "langgraph",
         "active_sessions": len(_user_sessions),
-        "forms_filled": _impact["forms_filled"],
+        "forms_filled":    _impact["forms_filled"],
     })
 
 
-# ── Landing Page ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# MCP STATUS
+# ---------------------------------------------------------------------------
+@app.get("/api/mcp-status")
+async def mcp_status():
+    import socket
+    from datetime import datetime, timezone
+    from backend.llm_client import _groq_ok, _nim_ok
+    ports = {
+        "whatsapp":   int(os.getenv("MCP_WHATSAPP_PORT",   "8100")),
+        "browser":    int(os.getenv("MCP_BROWSER_PORT",    "8101")),
+        "audit":      int(os.getenv("MCP_AUDIT_PORT",      "8102")),
+        "digilocker": int(os.getenv("MCP_DIGILOCKER_PORT", "8103")),
+    }
+    result = {}
+    for name, port in ports.items():
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            s.connect(("localhost", port))
+            s.close()
+            result[f"mcp_{name}"] = "online"
+        except Exception:
+            result[f"mcp_{name}"] = "offline"
+    result.update({
+        "groq":       "configured" if _groq_ok() else "missing_key",
+        "nvidia":     "configured" if _nim_ok()  else "missing_key",
+        "digilocker": "mock",
+        "gov_portal": "mock",
+        "timestamp":  datetime.now(timezone.utc).isoformat(),
+    })
+    return JSONResponse(result)
 
+
+# ---------------------------------------------------------------------------
+# RECEIPT — HTML download after form submission
+# ---------------------------------------------------------------------------
+@app.get("/api/receipt/{session_id}")
+async def get_receipt(session_id: str):
+    """
+    Return a printable HTML receipt for a submitted form.
+    The user can open this in a browser and Ctrl+P to save as PDF.
+    """
+    data = _completed_forms.get(session_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Receipt not found. It may have expired (server restart clears receipts).")
+
+    form_type   = data.get("form_type", "").replace("_", " ").title()
+    form_data   = data.get("form_data", {})
+    ref         = data.get("reference_number", "N/A")
+    timestamp   = data.get("timestamp", "")
+    from datetime import datetime as _dt
+    try:
+        ts = _dt.fromisoformat(timestamp).strftime("%d %b %Y, %I:%M %p")
+    except Exception:
+        ts = timestamp
+
+    def _flatten(d: dict, prefix: str = "") -> list[tuple[str, str]]:
+        rows = []
+        for k, v in d.items():
+            label = (prefix + k).replace("_", " ").title()
+            if isinstance(v, dict):
+                rows.extend(_flatten(v, prefix=k + " "))
+            elif v:
+                # Redact Aadhaar
+                val = str(v)
+                if "aadhaar" in k.lower() and len(val.replace(" ", "").replace("-", "")) >= 4:
+                    clean = val.replace(" ", "").replace("-", "")
+                    val = f"XXXX-XXXX-{clean[-4:]}"
+                rows.append((label, val))
+        return rows
+
+    rows = _flatten(form_data)
+    rows_html = "\n".join(
+        f"<tr><td>{lbl}</td><td>{val}</td></tr>"
+        for lbl, val in rows
+    )
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GramSetu Receipt — {form_type}</title>
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: 'Segoe UI', Arial, sans-serif; background: #f5f5f5; padding: 30px 20px; color: #1a1a1a; }}
+  .page {{ max-width: 700px; margin: 0 auto; background: white; border-radius: 12px;
+           box-shadow: 0 4px 24px rgba(0,0,0,.08); overflow: hidden; }}
+  .header {{ background: #0C0C0C; color: white; padding: 28px 32px; }}
+  .header h1 {{ font-size: 22px; font-weight: 700; letter-spacing: -.3px; }}
+  .header p {{ font-size: 13px; color: #aaa; margin-top: 4px; }}
+  .badge {{ display: inline-block; background: #22c55e; color: white; font-size: 11px;
+            font-weight: 700; padding: 3px 10px; border-radius: 99px; margin-top: 10px; letter-spacing: .4px; }}
+  .meta {{ padding: 20px 32px; border-bottom: 1px solid #eee; display: flex; gap: 32px; flex-wrap: wrap; }}
+  .meta-item {{ flex: 1; min-width: 180px; }}
+  .meta-item .label {{ font-size: 11px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }}
+  .meta-item .value {{ font-size: 15px; font-weight: 600; color: #0C0C0C; }}
+  .data-section {{ padding: 24px 32px; }}
+  .data-section h2 {{ font-size: 14px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 14px; }}
+  table {{ width: 100%; border-collapse: collapse; }}
+  tr:nth-child(even) td {{ background: #f9f9f9; }}
+  td {{ padding: 9px 12px; font-size: 13.5px; border-bottom: 1px solid #eee; vertical-align: top; }}
+  td:first-child {{ font-weight: 600; color: #555; width: 42%; white-space: nowrap; }}
+  td:last-child {{ color: #111; }}
+  .footer {{ padding: 20px 32px; border-top: 1px solid #eee; font-size: 12px; color: #999; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }}
+  .print-btn {{ display: inline-block; background: #0C0C0C; color: white; padding: 10px 22px; border-radius: 8px;
+                font-size: 13px; font-weight: 600; cursor: pointer; border: none; }}
+  @media print {{
+    body {{ background: white; padding: 0; }}
+    .page {{ box-shadow: none; border-radius: 0; }}
+    .print-btn {{ display: none !important; }}
+  }}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="header">
+    <h1>GramSetu</h1>
+    <p>AI Government Forms Assistant — Official Receipt</p>
+    <span class="badge">SUBMITTED</span>
+  </div>
+  <div class="meta">
+    <div class="meta-item">
+      <div class="label">Form Type</div>
+      <div class="value">{form_type}</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Reference Number</div>
+      <div class="value">{ref}</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Submitted On</div>
+      <div class="value">{ts}</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Data Source</div>
+      <div class="value">DigiLocker + NPCI</div>
+    </div>
+  </div>
+  <div class="data-section">
+    <h2>Form Details</h2>
+    <table>
+      {rows_html}
+    </table>
+  </div>
+  <div class="footer">
+    <span>Generated by GramSetu &bull; Data filled from DigiLocker &bull; {ts}</span>
+    <button class="print-btn" onclick="window.print()">Save as PDF</button>
+  </div>
+</div>
+</body>
+</html>"""
+
+    return HTMLResponse(content=html)
+
+
+# ---------------------------------------------------------------------------
+# SCREENSHOT
+# ---------------------------------------------------------------------------
+@app.get("/api/screenshot/{form_type}/{session_id}")
+async def get_screenshot(form_type: str, session_id: str):
+    fp = os.path.join(STATIC_DIR, "data", "screenshots", f"{form_type}_{session_id}.png")
+    if os.path.exists(fp):
+        return FileResponse(fp, media_type="image/png")
+    raise HTTPException(status_code=404, detail="Screenshot not found")
+
+
+# ---------------------------------------------------------------------------
+# AUDIT LOGS (admin-gated)
+# ---------------------------------------------------------------------------
+@app.get("/api/audit-logs")
+async def get_audit_logs(token: str = "", limit: int = 100):
+    if token != "gramsetu-admin-2025":
+        raise HTTPException(status_code=403, detail="Invalid admin token")
+    all_entries = []
+    try:
+        from backend.agents.graph import get_compiled_graph
+        compiled = get_compiled_graph()
+        for phone, info in _user_sessions.items():
+            sid = info.get("session_id")
+            if not sid:
+                continue
+            try:
+                snapshot = compiled.get_state({"configurable": {"thread_id": sid}})
+                if snapshot and snapshot.values:
+                    for e in snapshot.values.get("audit_entries", []):
+                        e.setdefault("user_id", phone)
+                        e.setdefault("form_type", snapshot.values.get("form_type", ""))
+                        e.setdefault("status", snapshot.values.get("status", ""))
+                    all_entries.extend(snapshot.values.get("audit_entries", []))
+            except Exception:
+                pass
+    except Exception:
+        pass
+    for log in db.get_audit_logs(limit):
+        all_entries.append({
+            "timestamp": log.get("timestamp", ""),
+            "user_id":   log.get("user_id", ""),
+            "form_type": log.get("form_type", ""),
+            "status":    log.get("status", "active"),
+            "node":      log.get("active_agent", ""),
+        })
+    all_entries.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    return JSONResponse(all_entries[:limit])
+
+
+# ---------------------------------------------------------------------------
+# LANDING PAGE
+# ---------------------------------------------------------------------------
 @app.get("/")
 async def landing_page():
     index_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse("<h1>GramSetu v3 Running 🌾</h1>")
+    return HTMLResponse("<h1>GramSetu v3 Running</h1>")
 
 
-# ============================================================
-# UPGRADE 1: MCP STATUS ENDPOINT
-# ============================================================
-
-@app.get("/api/mcp-status")
-async def mcp_status():
-    """Probe all 4 MCP server ports and return status."""
-    from datetime import datetime, timezone
-    ports = {
-        "whatsapp": int(os.getenv("MCP_WHATSAPP_PORT", 8100)),
-        "browser": int(os.getenv("MCP_BROWSER_PORT", 8101)),
-        "audit": int(os.getenv("MCP_AUDIT_PORT", 8102)),
-        "digilocker": int(os.getenv("MCP_DIGILOCKER_PORT", 8103)),
-    }
-    result = {}
-    async with httpx.AsyncClient(timeout=2.0) as client:
-        for name, port in ports.items():
-            try:
-                r = await client.get(f"http://localhost:{port}/sse", timeout=1.5)
-                result[name] = True
-            except Exception:
-                # Try a plain TCP probe as fallback
-                try:
-                    import socket
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(1)
-                    s.connect(("localhost", port))
-                    s.close()
-                    result[name] = True
-                except Exception:
-                    result[name] = False
-    result["timestamp"] = datetime.now(timezone.utc).isoformat()
-    return JSONResponse(result)
-
-
-# ============================================================
-# UPGRADE 2: SCREENSHOT ENDPOINT
-# ============================================================
-
-@app.get("/api/screenshot/{form_type}/{session_id}")
-async def get_screenshot(form_type: str, session_id: str):
-    """Serve a Playwright screenshot PNG from data/screenshots/."""
-    screenshot_dir = os.path.join(STATIC_DIR, "data", "screenshots")
-    filename = f"{form_type}_{session_id}.png"
-    filepath = os.path.join(screenshot_dir, filename)
-    if os.path.exists(filepath):
-        return FileResponse(filepath, media_type="image/png", filename=filename)
-    raise HTTPException(status_code=404, detail="Screenshot not found")
-
-
-# ============================================================
-# UPGRADE 3: VOICE INPUT ENDPOINT (for webapp)
-# ============================================================
-
-@app.post("/api/voice")
-async def voice_input(request: Request):
-    """Accept audio upload (WebM/WAV), transcribe, return text."""
-    import tempfile
-    content_type = request.headers.get("content-type", "")
-    if "multipart/form-data" in content_type:
-        form = await request.form()
-        audio_file = form.get("audio")
-        if not audio_file:
-            raise HTTPException(status_code=400, detail="'audio' field required")
-        audio_bytes = await audio_file.read()
-    else:
-        audio_bytes = await request.body()
-    if not audio_bytes:
-        raise HTTPException(status_code=400, detail="Empty audio")
-
-    # Save to temp file
-    suffix = ".webm" if b"webm" in audio_bytes[:32] else ".wav"
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=os.path.join(STATIC_DIR, "data", "voice_cache"))
-    tmp.write(audio_bytes)
-    tmp.close()
-
-    try:
-        text = await asyncio.to_thread(transcribe_audio, tmp.name, "hi")
-    except Exception as e:
-        text = ""
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
-
-    if not text:
-        return JSONResponse({"text": "", "language_detected": "hi", "confidence": 0.0})
-
-    lang = detect_language(text)
-    return JSONResponse({"text": text, "language_detected": lang, "confidence": 0.85})
-
-
-# ============================================================
-# UPGRADE 6: AUDIT LOGS ENDPOINT
-# ============================================================
-
-@app.get("/api/audit-logs")
-async def get_audit_logs(token: str = "", limit: int = 100):
-    """Return audit entries from all active sessions. Token-gated for demo."""
-    if token != "gramsetu-admin-2025":
-        raise HTTPException(status_code=403, detail="Invalid admin token")
-
-    from datetime import datetime, timezone
-    all_entries = []
-
-    # Collect from in-memory graph states via snapshot
-    try:
-        from backend.agents.graph import get_compiled_graph
-        compiled = get_compiled_graph()
-        for phone, session_info in _user_sessions.items():
-            sid = session_info.get("session_id")
-            if not sid:
-                continue
-            try:
-                config = {"configurable": {"thread_id": sid}}
-                snapshot = compiled.get_state(config)
-                if snapshot and snapshot.values:
-                    entries = snapshot.values.get("audit_entries", [])
-                    for e in entries:
-                        e.setdefault("user_id", phone)
-                        e.setdefault("form_type", snapshot.values.get("form_type", ""))
-                        e.setdefault("status", snapshot.values.get("status", ""))
-                        e.setdefault("timestamp", session_info.get("last_active", 0))
-                        e.setdefault("fields_filled", len(snapshot.values.get("form_data", {})))
-                    all_entries.extend(entries)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # Also pull from SQLite audit log
-    try:
-        db_logs = db.get_audit_logs(limit)
-        for log in db_logs:
-            all_entries.append({
-                "timestamp": log.get("timestamp", ""),
-                "user_id": log.get("user_id", ""),
-                "form_type": log.get("form_type", ""),
-                "status": log.get("status", "active"),
-                "fields_filled": 0,
-                "node": log.get("active_agent", ""),
-                "latency_ms": 0,
-            })
-    except Exception:
-        pass
-
-    # Sort by timestamp desc, limit
-    all_entries.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
-    return JSONResponse(all_entries[:limit])
-
-
-# ============================================================
-# WEBSOCKET: Live Browser Preview
-# ============================================================
-
+# ---------------------------------------------------------------------------
+# WEBSOCKET: Live browser preview during form filling
+# ---------------------------------------------------------------------------
 @app.websocket("/ws/browser/{session_id}")
 async def browser_preview_ws(websocket: WebSocket, session_id: str):
-    """
-    WebSocket for streaming live Playwright screenshots to the webapp.
-    The graph's fill_form_node broadcasts JPEG frames here as fields are filled.
-    """
+    """Stream Playwright screenshots to the webapp as fields are filled."""
     await websocket.accept()
-
-    # Register this client
     from backend.agents.graph import _browser_ws_clients
-    if session_id not in _browser_ws_clients:
-        _browser_ws_clients[session_id] = []
-    _browser_ws_clients[session_id].append(websocket)
-
+    _browser_ws_clients.setdefault(session_id, []).append(websocket)
     try:
         while True:
-            # Keep connection alive — client sends pings
             data = await websocket.receive_text()
             if data == "ping":
                 await websocket.send_text('{"type":"pong"}')
-    except WebSocketDisconnect:
-        pass
-    except Exception:
+    except (WebSocketDisconnect, Exception):
         pass
     finally:
-        if session_id in _browser_ws_clients:
-            try:
-                _browser_ws_clients[session_id].remove(websocket)
-            except ValueError:
-                pass
+        try:
+            _browser_ws_clients.get(session_id, []).remove(websocket)
+        except ValueError:
+            pass
 
 
-# ── Main ─────────────────────────────────────────────────────
-
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("whatsapp_bot.main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("whatsapp_bot.main:app", host="0.0.0.0",
+                port=int(os.getenv("PORT", "8000")), reload=True)

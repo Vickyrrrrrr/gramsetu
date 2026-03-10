@@ -44,8 +44,21 @@ async def discover_schemes(
         extra_keywords: Free-form hint string to guide LLM search
                         (e.g. "farmer needs agricultural loan")
     """
-    # Always use local curated database (instant, no LLM, always works)
-    # LLM-based discovery disabled for reliability during demo
+    # Try LLM-powered discovery first (Groq 70B with scheme knowledge)
+    from backend.llm_client import get_active_provider
+    if get_active_provider() != "fallback":
+        try:
+            llm_result = await _llm_discover(
+                age=age, gender=gender, income=income,
+                occupation=occupation, state=state,
+                language=language, extra_keywords=extra_keywords,
+            )
+            if llm_result and llm_result.get("count", 0) > 0:
+                return llm_result
+        except Exception as e:
+            print(f"[Schemes] LLM discovery failed, using local: {e}")
+
+    # Fallback to local curated database (always works)
     return _local_discover(age, gender, income, occupation, language)
 
 

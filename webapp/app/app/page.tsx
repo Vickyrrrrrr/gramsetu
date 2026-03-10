@@ -21,6 +21,7 @@ interface Message {
   text: string
   screenshotUrl?: string | null
   digilockerStatus?: string | null
+  receiptUrl?: string | null
 }
 
 type Status = 'idle' | 'loading' | 'error'
@@ -756,6 +757,7 @@ export default function AppPage() {
         addMsg('assistant', data.response || 'Something went wrong.', {
           screenshotUrl: data.screenshot_url || null,
           digilockerStatus: data.digilocker_auth_status || null,
+          receiptUrl: data.receipt_url || null,
         })
       } catch {
         addMsg(
@@ -962,6 +964,24 @@ export default function AppPage() {
                 )}
 
                 <BubbleText text={m.text} />
+
+                {/* Receipt download button */}
+                {m.receiptUrl && (
+                  <div className="mt-3">
+                    <a
+                      href={m.receiptUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                      style={{ background: '#16a34a' }}
+                    >
+                      📄 Download Receipt / Save as PDF
+                    </a>
+                    <p className="text-xs mt-1.5" style={{ color: '#6B6B6B' }}>
+                      Opens a printable receipt — press Ctrl+P to save as PDF.
+                    </p>
+                  </div>
+                )}
 
                 {/* Screenshot viewer (Upgrade 2) */}
                 {m.screenshotUrl && (

@@ -1,27 +1,26 @@
 """
 ============================================
-language_utils.py — Language Detection & Translation
+language_utils.py -- Language Detection & Translation
 ============================================
 Detects 10+ Indian languages from text using Unicode script ranges
 and language-specific romanized keyword sets.
-Supports dynamic translation via NVIDIA NIM (Nemotron-70b).
+Supports dynamic translation via Groq (primary) or NVIDIA NIM.
 
 Language codes returned:
-  hi  — Hindi / Hinglish (Devanagari)
-  mr  — Marathi          (Devanagari — detected by keywords)
-  ta  — Tamil            (Tamil script U+0B80–U+0BFF)
-  te  — Telugu           (Telugu script U+0C00–U+0C7F)
-  bn  — Bengali          (Bengali script U+0980–U+09FF)
-  gu  — Gujarati         (Gujarati script U+0A80–U+0AFF)
-  kn  — Kannada          (Kannada script U+0C80–U+0CFF)
-  ml  — Malayalam        (Malayalam script U+0D00–U+0D7F)
-  pa  — Punjabi/Gurmukhi (Gurmukhi script U+0A00–U+0A7F)
-  ur  — Urdu             (Arabic-Perso script U+0600–U+06FF)
-  en  — English (default fallback)
+  hi  -- Hindi / Hinglish (Devanagari)
+  mr  -- Marathi          (Devanagari -- detected by keywords)
+  ta  -- Tamil            (Tamil script U+0B80-U+0BFF)
+  te  -- Telugu           (Telugu script U+0C00-U+0C7F)
+  bn  -- Bengali          (Bengali script U+0980-U+09FF)
+  gu  -- Gujarati         (Gujarati script U+0A80-U+0AFF)
+  kn  -- Kannada          (Kannada script U+0C80-U+0CFF)
+  ml  -- Malayalam        (Malayalam script U+0D00-U+0D7F)
+  pa  -- Punjabi/Gurmukhi (Gurmukhi script U+0A00-U+0A7F)
+  ur  -- Urdu             (Arabic-Perso script U+0600-U+06FF)
+  en  -- English (default fallback)
 """
 
 import re
-from agent_core.nims_client import translate_text, is_nim_available
 
 # -----------------------------------------------------------
 # Unicode Script Ranges → Language Code
@@ -165,33 +164,29 @@ def get_language_name(lang_code: str) -> str:
 def translate_to_english(text: str, source_lang: str = None) -> str:
     """
     Translate any Indian-language text to English for LLM processing.
-
-    Args:
-        text: Input text
-        source_lang: Source language code (auto-detected if None)
-
-    Returns:
-        English translation (or original if already English)
+    Sync wrapper -- runs async translation in a new event loop.
     """
     if source_lang is None:
         source_lang = detect_language(text)
-
     if source_lang == "en":
         return text
 
-    if is_nim_available():
-        return translate_text(text, source_lang, "en")
-
-    # Fallback: simple keyword-based translation (Hindi only)
-    return _simple_translate_to_english(text)
+    try:
+        import asyncio
+        from backend.llm_client import chat_translation
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(chat_translation(text, source_lang, "en"))
+        loop.close()
+        return result or text
+    except Exception as e:
+        print(f"[LangUtils] translate_to_english failed: {e}")
+        return _simple_translate_to_english(text)
 
 
 async def translate_to_language(text: str, target_lang: str) -> str:
     """
-    Translate ``text`` to ``target_lang`` using NIM (nvidia/llama-3.1-nemotron-70b-instruct).
-
-    If target is Hindi or English, uses local keyword map / NIM.
-    For other Indian languages, uses NIM's multilingual capability.
+    Translate text to target_lang using Groq 70B (primary).
+    Falls back to original text on failure.
 
     Args:
         text: Source text (English or Hindi template message)
@@ -203,42 +198,30 @@ async def translate_to_language(text: str, target_lang: str) -> str:
     if target_lang in ("en", ""):
         return text
 
-    if target_lang == "hi":
-        if is_nim_available():
-            return translate_text(text, "en", "hi")
-        return text
-
-    # Use NIM (Nemotron-70b) for all other Indian languages — excellent multilingual support
     try:
-        from backend.llm_client import chat_conversational
-
-        lang_name = get_language_name(target_lang)
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    f"Translate the following WhatsApp message into {lang_name}. "
-                    "Keep all emojis, numbers, and URLs as-is. "
-                    "Return ONLY the translated text — no explanation."
-                ),
-            },
-            {"role": "user", "content": text},
-        ]
-        translated = await chat_conversational(messages, temperature=0.1, max_tokens=1500)
-        return translated.strip() if translated else text
+        from backend.llm_client import chat_translation
+        source_lang = "en" if not any(
+            re.search(p, text) for p, _ in SCRIPT_RANGES
+        ) else detect_language(text)
+        result = await chat_translation(text, source_lang, target_lang)
+        return result or text
     except Exception as e:
         print(f"[LangUtils] Translation to {target_lang} failed: {e}")
         return text
 
 
 def translate_to_hindi(text: str) -> str:
-    """
-    Translate English text to Hindi for user response.
-    """
-    if is_nim_available():
-        return translate_text(text, "en", "hi")
-
-    return text  # Return English if translation unavailable
+    """Translate English text to Hindi (sync)."""
+    try:
+        import asyncio
+        from backend.llm_client import chat_translation
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(chat_translation(text, "en", "hi"))
+        loop.close()
+        return result or text
+    except Exception as e:
+        print(f"[LangUtils] translate_to_hindi failed: {e}")
+        return text
 
 
 def _simple_translate_to_english(text: str) -> str:
@@ -250,11 +233,9 @@ def _simple_translate_to_english(text: str) -> str:
         "स्थिति": "status", "जाँच": "check", "हाँ": "yes",
         "नहीं": "no", "धन्यवाद": "thank you",
     }
-
     result = text
     for hindi, english in translations.items():
         result = result.replace(hindi, english)
-
     return result
 
 

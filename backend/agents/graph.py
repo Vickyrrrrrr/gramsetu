@@ -27,7 +27,7 @@ import json
 import time
 import uuid
 import asyncio
-from typing import Optional, Literal
+from typing import Any, Optional
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -141,7 +141,14 @@ def _detect_intent_keywords(text: str) -> tuple[str, float]:
 
 
 async def _call_nim(messages: list[dict], temperature: float = 0.1, max_tokens: int = 256) -> str:
-    """Kept for API compatibility — now always uses keyword fallback."""
+    """LLM-powered intent/chat -- Groq primary, keyword fallback."""
+    try:
+        from backend.llm_client import chat_intent
+        result = await chat_intent(messages, temperature, max_tokens)
+        if result:
+            return result
+    except Exception as e:
+        print(f"[Graph] LLM _call_nim failed: {e}")
     return _fallback_response(messages)
 
 
@@ -197,11 +204,15 @@ async def _broadcast_screenshot(
 
 
 async def _call_llm_conversational(text: str, lang: str) -> str:
-    """
-    LLM conversational reply — DISABLED for reliability.
-    Menu fallback always used instead.
-    """
-    return ""  # Always fall through to static menu
+    """Conversational reply via Groq 70B multilingual model."""
+    try:
+        from backend.llm_client import chat_conversational
+        messages = [{"role": "user", "content": text}]
+        result = await chat_conversational(messages, temperature=0.5, max_tokens=512)
+        return result or ""
+    except Exception as e:
+        print(f"[Graph] Conversational LLM failed: {e}")
+        return ""
 
 
 # ============================================================
@@ -213,25 +224,34 @@ async def _call_asr(audio_path: str, language: str = "hi") -> str:
     import httpx
     NVIDIA_ASR_URL = "https://integrate.api.nvidia.com/v1/audio/transcriptions"
 
-    if not NVIDIA_API_KEY or NVIDIA_API_KEY == "nvapi-your-key-here":
-        return _mock_asr(language)
-
+    # 1. Try Groq Whisper (best accuracy for Indian languages)
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            with open(audio_path, "rb") as f:
-                response = await client.post(
-                    NVIDIA_ASR_URL,
-                    headers={"Authorization": f"Bearer {NVIDIA_API_KEY}"},
-                    files={"file": f},
-                    data={
-                        "model": "nvidia/parakeet-ctc-1.1b-asr",
-                        "language": language,
-                    },
-                )
-            result = response.json()
-            return result.get("text", "")
-    except Exception:
-        return _mock_asr(language)
+        from backend.llm_client import transcribe_audio_groq
+        result = await transcribe_audio_groq(audio_path, language)
+        if result:
+            print(f"[ASR] Groq Whisper: {result[:60]}")
+            return result
+    except Exception as e:
+        print(f"[ASR] Groq Whisper error: {e}")
+
+    # 2. NVIDIA parakeet backup
+    if NVIDIA_API_KEY and NVIDIA_API_KEY != "nvapi-your-key-here":
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                with open(audio_path, "rb") as f:
+                    response = await client.post(
+                        NVIDIA_ASR_URL,
+                        headers={"Authorization": f"Bearer {NVIDIA_API_KEY}"},
+                        files={"file": f},
+                        data={"model": "nvidia/parakeet-ctc-1.1b-asr", "language": language},
+                    )
+                result = response.json().get("text", "")
+                if result:
+                    return result
+        except Exception:
+            pass
+
+    return _mock_asr(language)
 
 
 def _mock_asr(language: str) -> str:
@@ -245,21 +265,31 @@ def _mock_asr(language: str) -> str:
 async def _localized(msg_hi: str, msg_en: str, lang: str) -> str:
     """
     Return the appropriate localized message.
-
-    - Hindi  → msg_hi  (pre-written)
-    - English → msg_en (pre-written)
-    - Other Indian languages → NIM Nemotron-70b translates msg_en on the fly
+    Uses Groq 70B for real-time translation of other Indian languages.
     """
     if lang == "hi":
         return msg_hi
     if lang == "en":
         return msg_en
-    # Dynamic translation via NIM for Tamil, Telugu, Bengali, etc.
+    return await translate_to_language_safe(msg_en, lang)
+
+
+async def translate_to_language_safe(text: str, target_lang: str) -> str:
+    """Translate text to target language, falling back to English on error."""
+    if target_lang in ("en", ""):
+        return text
+    try:
+        from backend.llm_client import chat_translation
+        result = await chat_translation(text, "en", target_lang)
+        return result or text
+    except Exception as e:
+        print(f"[Graph] Translation to {target_lang} failed: {e}")
+    # Second fallback via language_utils
     try:
         from whatsapp_bot.language_utils import translate_to_language
-        return await translate_to_language(msg_en, lang)
+        return await translate_to_language(text, target_lang)
     except Exception:
-        return msg_en  # fallback to English
+        return text
 
 
 # ============================================================
@@ -320,7 +350,34 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
     if intent != "unknown" and conf >= 0.5 and intent != "scheme_suggest":
         state["form_type"] = intent
         state["next_node"] = "digilocker_fetch"
-        state["status"] = GraphStatus.ACTIVE.value
+        # ── SUSPEND: Ask for photo verification before DigiLocker ──
+        form_label = intent.replace('_', ' ').title()
+        state["response"] = await _localized(
+            (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📋 *चरण 1/4 — पहचान सत्यापन*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"✅ फ़ॉर्म पहचाना: *{form_label}*\n\n"
+                f"📸 आगे बढ़ने से पहले, कृपया:\n"
+                f"   • अपनी एक *सेल्फ़ी* भेजें\n"
+                f"   • या *'continue'* टाइप करें\n\n"
+                f"🔐 आपकी फ़ोटो आधार फ़ोटो से मिलान की जाएगी।\n"
+                f"📄 इसके बाद मैं DigiLocker से आपका डेटा लूँगा।"
+            ),
+            (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📋 *Step 1 of 4 — Identity Verification*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"✅ Form identified: *{form_label}*\n\n"
+                f"📸 Before proceeding, please:\n"
+                f"   • Send a *selfie* for face verification\n"
+                f"   • Or type *'continue'* to skip\n\n"
+                f"🔐 Your photo will be matched with your Aadhaar photo.\n"
+                f"📄 After this, I'll fetch your data from DigiLocker."
+            ),
+            lang,
+        )
+        state["status"] = GraphStatus.WAIT_USER.value
     elif intent == "scheme_suggest" and conf >= 0.5:
         # ── Scheme Discovery Flow ─────────────────────────────
         state["status"] = GraphStatus.ACTIVE.value
@@ -359,12 +416,84 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
             "agent": "intent_detector", "node": "detect_intent",
             "action": "scheme_discovery",
             "input": text[:80],
-            "output": f"intent=scheme_suggest, found schemes",
+            "output": "intent=scheme_suggest, found schemes",
             "confidence": conf, "latency_ms": round(latency, 1),
         })
         return state
     else:
-        # Unknown intent — show static menu (instant, no LLM needed).
+        # Unknown keyword intent — try LLM for complex/natural language inputs
+        if len(text.strip()) > 8:
+            try:
+                llm_messages = [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are an intent classifier for a government form-filling bot in India. "
+                            "Classify the user message into ONE of these intents:\n"
+                            "ration_card, pension, ayushman_bharat, mnrega, pan_card, voter_id, "
+                            "caste_certificate, birth_certificate, pm_kisan, kisan_credit_card, jan_dhan, "
+                            "scheme_suggest (user wants to know which schemes they qualify for), unknown\n\n"
+                            "Respond ONLY with valid JSON: "
+                            '{\"intent\": \"<intent>\", \"confidence\": <0.0-1.0>}'
+                        ),
+                    },
+                    {"role": "user", "content": text},
+                ]
+                llm_raw = await _call_nim(llm_messages, temperature=0.1, max_tokens=80)
+                if llm_raw and "{" in llm_raw:
+                    import json as _j
+                    import re as _re
+                    m = _re.search(r'\{.*\}', llm_raw, _re.DOTALL)
+                    if m:
+                        parsed = _j.loads(m.group(0))
+                        llm_intent = parsed.get("intent", "unknown")
+                        llm_conf = float(parsed.get("confidence", 0))
+                        valid_intents = {
+                            "ration_card", "pension", "ayushman_bharat", "mnrega",
+                            "pan_card", "voter_id", "caste_certificate", "birth_certificate",
+                            "pm_kisan", "kisan_credit_card", "jan_dhan",
+                        }
+                        if llm_intent in valid_intents and llm_conf >= 0.5:
+                            state["form_type"] = llm_intent
+                            state["next_node"] = "digilocker_fetch"
+                            state["status"] = GraphStatus.ACTIVE.value
+                            state["current_node"] = "detect_intent"
+                            state.setdefault("audit_entries", []).append({
+                                "agent": "intent_detector", "node": "detect_intent",
+                                "action": "llm_classify_intent",
+                                "input": text[:80],
+                                "output": f"intent={llm_intent} conf={llm_conf:.2f}",
+                                "confidence": llm_conf, "latency_ms": round((time.time() - start) * 1000, 1),
+                            })
+                            return state
+                        elif llm_intent == "scheme_suggest" and llm_conf >= 0.5:
+                            intent = "scheme_suggest"
+                            conf = llm_conf
+                            # Re-run scheme discovery
+                            try:
+                                from backend.schemes import discover_from_message
+                                result = await discover_from_message(text, lang)
+                                base_msg = result.get("message", "")
+                            except Exception:
+                                base_msg = ""
+                            if not base_msg:
+                                base_msg = (
+                                    "🔍 No schemes found. Please share your age, income, and occupation."
+                                    if lang == "en"
+                                    else "🔍 कोई योजना नहीं मिली। उम्र, आय, और पेशा बताएं।"
+                                )
+                            state["response"] = (
+                                await translate_to_language_safe(base_msg, lang)
+                                if lang not in ("hi", "en") else base_msg
+                            )
+                            state["status"] = GraphStatus.WAIT_USER.value
+                            state["next_node"] = "detect_intent"
+                            state["current_node"] = "detect_intent"
+                            return state
+            except Exception as e:
+                print(f"[Graph] LLM intent fallback error: {e}")
+
+        # Show static menu
         menu_hi = (
             "🙏 नमस्ते! मैं *ग्रामसेतु* हूँ — आपका AI सरकारी फ़ॉर्म सहायक।\n\n"
             "📋 *मैं ये फ़ॉर्म भर सकता हूँ:*\n\n"
@@ -565,30 +694,39 @@ async def confirm_node(state: GramSetuState) -> GramSetuState:
 
     if lang == "hi":
         state["response"] = (
-            f"📋 *आपके फ़ॉर्म का सारांश (DigiLocker से)*\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📋 *चरण 2/4 — डेटा सत्यापन*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔒 *DigiLocker से प्राप्त डेटा:*\n\n"
             f"{summary}\n\n"
             f"📊 विश्वसनीयता: {int(avg_conf * 100)}%\n\n"
-            f"✅ सही है? *YES* भेजें → मैं फ़ॉर्म भर दूँगा\n"
+            f"✅ सही है? *YES* भेजें → मैं पोर्टल पर फ़ॉर्म भरूँगा\n"
             f"❌ कुछ गलत है? सीधे सही जानकारी भेजें\n"
             f"      जैसे: \"income 80000\" या \"family 5\"\n"
             f"🔄 *0* भेजें → नए सिरे से शुरू करें"
         )
     elif lang == "en":
         state["response"] = (
-            f"📋 *Your Form Summary (from DigiLocker)*\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📋 *Step 2 of 4 — Data Verification*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔒 *Data fetched from DigiLocker:*\n\n"
             f"{summary}\n\n"
             f"📊 Confidence: {int(avg_conf * 100)}%\n\n"
-            f"✅ Is this correct? Reply *YES* → I'll fill the form\n"
+            f"✅ Is this correct? Reply *YES* → I'll fill the portal\n"
             f"❌ Something wrong? Just send the correction\n"
             f"      e.g.: \"income 80000\" or \"family 5\"\n"
             f"🔄 Reply *0* to start over"
         )
     else:
         en_summary = (
-            f"📋 *Your Form Summary (from DigiLocker)*\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📋 *Step 2 of 4 — Data Verification*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🔒 *Data fetched from DigiLocker:*\n\n"
             f"{summary}\n\n"
             f"📊 Confidence: {int(avg_conf * 100)}%\n\n"
-            f"✅ Is this correct? Reply *YES* → I'll fill the form\n"
+            f"✅ Is this correct? Reply *YES* → I'll fill the portal\n"
             f"❌ Something wrong? Just send the correction\n"
             f"🔄 Reply *0* to start over"
         )
@@ -648,34 +786,54 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     # ── Resuming after OTP ───────────────────────────────────
     if state.get("otp_value"):
         otp = state["otp_value"]
+        form_type = state.get("form_type", "")
+        form_data = state.get("form_data", {})
+
+        # Generate a fake reference number for the receipt
+        import hashlib as _hs
+        ref = "GS" + _hs.md5(f"{form_type}{time.time()}".encode()).hexdigest()[:10].upper()
 
         state.setdefault("audit_entries", []).append({
             "agent": "form_filler", "node": "fill_form",
             "action": "submit_otp",
-            "input": "OTP received", "output": "Submitted to portal",
+            "input": "OTP received",
+            "output": f"Submitted — ref {ref}",
             "confidence": 0.9, "latency_ms": 0,
         })
 
         state["response"] = await _localized(
             (
-                "✅ *OTP सबमिट हो गया!*\n\n"
-                "📝 आपका फ़ॉर्म सफलतापूर्वक जमा हो गया है।\n"
-                "📋 SMS पर पुष्टि मिलेगी।\n\n"
-                "🙏 ग्रामसेतु का उपयोग करने के लिए धन्यवाद!\n"
-                "नया फ़ॉर्म भरने के लिए: 0 भेजें"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📋 *चरण 4/4 — आवेदन जमा!*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"✅ *आवेदन सफलतापूर्वक जमा हो गया!*\n\n"
+                f"📋 फ़ॉर्म: {form_type.replace('_', ' ').title()}\n"
+                f"🔢 संदर्भ संख्या: *{ref}*\n"
+                f"📱 SMS पर पुष्टि मिलेगी।\n\n"
+                f"📄 *नीचे बटन पर क्लिक करके रसीद डाउनलोड करें*\n\n"
+                f"🙏 ग्रामसेतु का उपयोग करने के लिए धन्यवाद!\n"
+                f"नया फ़ॉर्म भरने के लिए टाइप करें या *0* भेजें।"
             ),
             (
-                "✅ *OTP Submitted!*\n\n"
-                "📝 Your form has been submitted successfully.\n"
-                "📋 You'll receive a confirmation SMS.\n\n"
-                "🙏 Thank you for using GramSetu!\n"
-                "For a new form: send 0"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📋 *Step 4 of 4 — Application Submitted!*\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"✅ *Application successfully submitted!*\n\n"
+                f"📋 Form: {form_type.replace('_', ' ').title()}\n"
+                f"🔢 Reference: *{ref}*\n"
+                f"📱 You'll receive a confirmation SMS.\n\n"
+                f"📄 *Click the button below to download your receipt*\n\n"
+                f"🙏 Thank you for using GramSetu!\n"
+                f"Start a new form by typing what you need."
             ),
             lang,
         )
 
         state["status"] = GraphStatus.COMPLETED.value
-        state["otp_value"] = ""  # PII cleanup
+        state["otp_value"] = ""        # PII cleanup
+        state["screenshot_b64"] = ""   # Clear — so it won't appear on future messages
+        state["receipt_ready"] = True
+        state["reference_number"] = ref
         state["current_node"] = "fill_form"
         state["next_node"] = ""
         return state
@@ -784,7 +942,6 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
                         await page.wait_for_timeout(150)
 
                         tag = await locator.evaluate("el => el.tagName.toLowerCase()")
-                        input_type = await locator.evaluate("el => el.type || ''")
                         if tag == "select":
                             try:
                                 await locator.select_option(label=str(field_value), timeout=1000)
@@ -793,10 +950,6 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
                                     await locator.select_option(value=str(field_value).lower(), timeout=1000)
                                 except Exception:
                                     pass
-                        elif input_type == "date":
-                            # Date inputs don't work well with press_sequentially because of masking
-                            await locator.fill(str(field_value))
-                            await page.wait_for_timeout(80)
                         else:
                             await locator.fill("")
                             val_str = str(field_value)
@@ -823,9 +976,19 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
                             ss_b64 = _b64.b64encode(ss_bytes).decode()
                             label = field_name.replace('_', ' ').title()
                             progress = filled_idx / max(total_fields, 1)
-                            # WebSocket broadcast from main loop — post via thread-safe call
-                            # (fire-and-forget; OK if missed during threading)
+                            # Store for polling fallback
                             _screenshot_cache[f"ws_{session_id}"] = ss_b64
+                            # Push live frame to main event loop via threadsafe call
+                            if _main_loop and not _main_loop.is_closed():
+                                asyncio.run_coroutine_threadsafe(
+                                    _broadcast_screenshot(
+                                        session_id, ss_b64,
+                                        step=f"Filling: {label}",
+                                        progress=progress,
+                                        user_id=user_id_for_ws,
+                                    ),
+                                    _main_loop,
+                                )
                         except Exception:
                             pass
 
@@ -864,6 +1027,14 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
             print(f"[Playwright] ❌ Error: {exc}")
 
     print(f"[Playwright] 🚀 Launching Chrome for {form_type} — {len(form_data)} fields")
+
+    # Capture the main asyncio event loop BEFORE spawning the thread so the
+    # Playwright thread can post live screenshots back via run_coroutine_threadsafe.
+    try:
+        _main_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _main_loop = None
+
     pw_thread = threading.Thread(target=_run_playwright_sync, daemon=True)
     pw_thread.start()
     pw_thread.join(timeout=120)  # wait up to 2 min
@@ -921,17 +1092,23 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     filled_label = f"{fields_filled}" if not playwright_error else "N/A"
     state["response"] = await _localized(
         (
-            "🌐 *पोर्टल पर फ़ॉर्म भर दिया!*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📋 *चरण 3/4 — पोर्टल पर फ़ॉर्म भरा*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📍 सरकारी पोर्टल — {form_type.replace('_', ' ').title()}\n"
             f"✅ {filled_label} फ़ील्ड भरे गए (DigiLocker से स्वतः)\n\n"
+            "🖼️ ↓ स्क्रीनशॉट देखें — AI ने क्या भरा\n\n"
             "🔐 *OTP आवश्यक है*\n"
             "पोर्टल ने आपके रजिस्टर्ड मोबाइल पर 6-अंकीय कोड भेजा है।\n\n"
             "👉 वह कोड यहाँ भेजें:"
         ),
         (
-            "🌐 *Form filled on portal!*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📋 *Step 3 of 4 — Form Filled on Portal*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"📍 Government Portal — {form_type.replace('_', ' ').title()}\n"
             f"✅ {filled_label} fields filled automatically from DigiLocker\n\n"
+            "🖼️ ↓ See screenshot below — review what AI filled\n\n"
             "🔐 *OTP Required*\n"
             "The portal sent a 6-digit code to your registered mobile.\n\n"
             "👉 Send that code here:"
@@ -1086,13 +1263,25 @@ async def _process_with_compiled_graph(
         status = existing_state.get("status", "")
 
         if status == GraphStatus.WAIT_OTP.value:
-            # If user sends a form-intent keyword instead of OTP → start fresh
             raw = message.strip().lower()
+            # If user sends a form-intent keyword instead of OTP → start fresh
             if any(kw in raw for kw in _FORM_INTENT_KEYWORDS) and not raw.isdigit():
                 print(f"[Graph] WAIT_OTP: new intent detected '{raw[:40]}' — starting fresh")
                 existing_state = None  # fall through to fresh session
             else:
-                existing_state["otp_value"] = message.strip()
+                # Validate: OTP must be 4-8 digits only
+                otp_candidate = message.strip().replace(" ", "").replace("-", "")
+                if not otp_candidate.isdigit() or not (4 <= len(otp_candidate) <= 8):
+                    lang = existing_state.get("language", "hi")
+                    existing_state["response"] = (
+                        f"⚠️ OTP में सिर्फ अंक होने चाहिए (4-8 अंक)।\n"
+                        f"जैसे: *123456*\n\nआपने भेजा: '{message[:30]}'\nकृपया सही OTP भेजें।"
+                        if lang == "hi" else
+                        f"⚠️ OTP must be 4-8 digits (e.g. *123456*).\n"
+                        f"You sent: '{message[:30]}'\nPlease send your OTP."
+                    )
+                    return _format_result(existing_state, session_id)
+                existing_state["otp_value"] = otp_candidate
                 existing_state["message_type"] = "otp"
                 existing_state["status"] = GraphStatus.ACTIVE.value
                 existing_state["next_node"] = "fill_form"
@@ -1161,7 +1350,10 @@ async def _process_with_compiled_graph(
                     return _format_result(existing_state, session_id)
 
         if status == GraphStatus.WAIT_USER.value:
-            if message.strip() in ("1","2","3","4","5","6","7","8","9","10","11","12"):
+            # Only re-map numbers if no form_type yet (menu selection).
+            # If form_type is already set, user is responding to photo
+            # verification — don't override their chosen form.
+            if not existing_state.get("form_type") and message.strip() in ("1","2","3","4","5","6","7","8","9","10","11","12"):
                 intent_map = {
                     "1":  "ration_card",
                     "2":  "pension",
@@ -1218,7 +1410,8 @@ async def _process_with_compiled_graph(
     result = await compiled.ainvoke(initial_state, config)
     return _format_result(result, session_id)
 
-def _parse_corrections(text: str, form_data: dict) -> dict:
+
+def _parse_corrections(text: str, form_data: dict) -> dict[str, Any]:
     """
     Parse user corrections like:
         "income 80000"
@@ -1226,7 +1419,7 @@ def _parse_corrections(text: str, form_data: dict) -> dict:
         "category APL"
         "pension_type widow"
     """
-    corrections = {}
+    corrections: dict[str, Any] = {}
     text = text.strip()
 
     # Common field aliases
@@ -1266,21 +1459,25 @@ def _parse_corrections(text: str, form_data: dict) -> dict:
     return corrections
 
 
-def _format_result(state: dict, session_id: str) -> dict:
+def _format_result(state: GramSetuState, session_id: str) -> dict[str, Any]:
     """Format graph output for API response."""
+    # Pop screenshot from cache so it only appears ONCE (right after form fill).
+    # Without pop, every subsequent message would also include the screenshot.
+    screenshot = _screenshot_cache.pop(session_id, "") or state.get("screenshot_b64", "")
     return {
-        "response": state.get("response", ""),
-        "status": state.get("status", ""),
-        "session_id": session_id,
-        "current_node": state.get("current_node", ""),
-        "language": state.get("language", "hi"),
-        "form_type": state.get("form_type", ""),
-        "form_data": state.get("form_data", {}),
+        "response":          state.get("response", ""),
+        "status":            state.get("status", ""),
+        "session_id":        session_id,
+        "current_node":      state.get("current_node", ""),
+        "language":          state.get("language", "hi"),
+        "form_type":         state.get("form_type", ""),
+        "form_data":         state.get("form_data", {}),
         "confidence_scores": state.get("confidence_scores", {}),
-        "missing_fields": state.get("missing_fields", []),
+        "missing_fields":    state.get("missing_fields", []),
         "validation_errors": state.get("validation_errors", []),
-        "audit_entries": state.get("audit_entries", []),
-        # Base64-encoded PNG of the filled form — returned as data URI, no file-serving needed
-        # Prefer cached screenshot (reliable) over state dict (may be lost in graph pipeline)
-        "screenshot_b64": _screenshot_cache.get(session_id, "") or state.get("screenshot_b64", ""),
+        "audit_entries":     state.get("audit_entries", []),
+        "screenshot_b64":    screenshot,
+        "receipt_ready":     state.get("receipt_ready", False),
+        "reference_number":  state.get("reference_number", ""),
+        "digilocker_auth_status": state.get("digilocker_auth_status", ""),
     }

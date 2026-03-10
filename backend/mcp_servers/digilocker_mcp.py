@@ -384,25 +384,26 @@ def _map_to_form_fields(form_type: str, aadhaar: dict, pan: dict, dl: dict) -> d
             "mobile_number": mobile,
             "annual_income": 60000,     # Default
             "address": address,
-            "account_number": "30458921004",  # Mock default for demo
-            "ifsc": "SBIN0001234",            # Mock default for demo
-            "bank_name": "State Bank of India", # Mock default for demo
+            "bank_account": {
+                "account_holder_name": name,
+                "account_number": "",  # Not in DigiLocker
+                "ifsc_code": "",       # Not in DigiLocker
+                "bank_name": "",       # Not in DigiLocker
+            },
         }
         sources = {
             "applicant_name": "Aadhaar", "aadhaar_number": "Aadhaar",
             "date_of_birth": "Aadhaar", "gender": "Aadhaar",
             "mobile_number": "Aadhaar", "address": "Aadhaar",
             "pension_type": "Default", "annual_income": "Default",
-            "account_number": "DigiLocker bank link",
-            "ifsc": "DigiLocker bank link",
-            "bank_name": "DigiLocker bank link",
+            "bank_account": "User input needed",
         }
         confidence = {
             "applicant_name": 0.98, "aadhaar_number": 0.99,
             "date_of_birth": 0.98, "gender": 0.98,
             "mobile_number": 0.95, "address": 0.95,
             "pension_type": 0.40, "annual_income": 0.30,
-            "account_number": 0.90, "ifsc": 0.90, "bank_name": 0.90,
+            "bank_account": 0.0,
         }
 
     # ── Identity (PAN/Voter ID) ──────────────────────────────
@@ -445,9 +446,6 @@ def _map_to_form_fields(form_type: str, aadhaar: dict, pan: dict, dl: dict) -> d
             "state":         address.get("state", ""),
             "pin_code":      address.get("pincode", ""),
             "annual_income": 120000,
-            "account_number": "30458921004",
-            "ifsc": "SBIN0001234",
-            "bank_name": "State Bank of India",
         }
         sources = {"full_name": "Aadhaar", "aadhaar": "Aadhaar", "mobile": "Aadhaar",
                    "dob": "Aadhaar", "gender": "Aadhaar", "house_no": "Aadhaar",
@@ -471,9 +469,6 @@ def _map_to_form_fields(form_type: str, aadhaar: dict, pan: dict, dl: dict) -> d
             "district":   address.get("district", ""),
             "state":      address.get("state", ""),
             "pin_code":   address.get("pincode", ""),
-            "account_number": "30458921004",
-            "ifsc": "SBIN0001234",
-            "bank_name": "State Bank of India",
         }
         sources = {"full_name": "Aadhaar", "aadhaar": "Aadhaar", "mobile": "Aadhaar",
                    "dob": "Aadhaar", "gender": "Aadhaar", "house_no": "Aadhaar",
@@ -495,9 +490,6 @@ def _map_to_form_fields(form_type: str, aadhaar: dict, pan: dict, dl: dict) -> d
             "district":   address.get("district", ""),
             "state":      address.get("state", ""),
             "pin_code":   address.get("pincode", ""),
-            "account_number": "30458921004",
-            "ifsc": "SBIN0001234",
-            "bank_name": "State Bank of India",
         }
         sources = {"full_name": "Aadhaar", "aadhaar": "Aadhaar", "mobile": "Aadhaar"}
         confidence = {"full_name": 0.98, "aadhaar": 0.99, "mobile": 0.95}
@@ -549,11 +541,85 @@ def _get_demo_pan() -> dict:
     }
 
 
+def _get_demo_bank() -> dict:
+    """
+    Demo bank account data (NPCI Aadhaar-linked account).
+
+    In production: fetched from NPCI's Aadhaar Payment Bridge (APB) / Mapper API.
+    Requires: (a) payment aggregator / bank license, or
+              (b) Account Aggregator (AA) framework license from RBI.
+    See DIGILOCKER_INTEGRATION.md for real API details.
+    """
+    return {
+        "account_holder_name": "Ram Kumar Sharma",
+        "account_number": "31850100073456",
+        "ifsc_code": "SBIN0001234",
+        "bank_name": "State Bank of India",
+        "branch": "Lucknow Main Branch",
+        "account_type": "savings",
+        "linked_aadhaar": "2834 1256 9087",
+        "npci_linked": True,
+        "source": "npci_aadhaar_mapper_demo",
+    }
+
+
 def _get_demo_data(form_type: str) -> dict:
     aadhaar = _get_demo_aadhaar()
     pan = _get_demo_pan()
     dl = {}
-    return _map_to_form_fields(form_type, aadhaar, pan, dl)
+    result = _map_to_form_fields(form_type, aadhaar, pan, dl)
+    # Inject bank details where relevant
+    bank = _get_demo_bank()
+    if form_type in ("pension", "pm_kisan", "jan_dhan", "kisan_credit_card", "mnrega", "ayushman_bharat"):
+        result["extracted_data"]["bank_account"] = {
+            "account_holder_name": bank["account_holder_name"],
+            "account_number": bank["account_number"],
+            "ifsc_code": bank["ifsc_code"],
+            "bank_name": bank["bank_name"],
+        }
+        result["confidence_scores"]["bank_account"] = 0.90
+        result["sources"]["bank_account"] = "NPCI Aadhaar Mapper"
+        # Remove bank_account from missing_fields if it was there
+        result["missing_fields"] = [f for f in result["missing_fields"] if f != "bank_account"]
+    return result
+
+
+# ============================================================
+# TOOL 8: Fetch Bank Details (NPCI Aadhaar-linked account)
+# ============================================================
+
+@mcp.tool()
+async def fetch_bank_details(
+    aadhaar_number: str,
+    access_token: str = "demo",
+) -> dict:
+    """
+    Fetch the bank account linked to the user's Aadhaar via NPCI.
+
+    In production this calls the NPCI Aadhaar Payment Bridge (APB) Mapper API.
+    Requirements for real API:
+      - Payment aggregator license OR bank/NBFC integration
+      - Or use the Account Aggregator (AA / Sahamati) framework — RBI licensed
+
+    Args:
+        aadhaar_number: User's 12-digit Aadhaar number
+        access_token:   DigiLocker/NPCI access token
+
+    Returns:
+        {"account_number": "...", "ifsc_code": "...", "bank_name": "...", ...}
+    """
+    if not access_token or access_token == "demo":
+        return _get_demo_bank()
+
+    # Real NPCI APB API (requires license):
+    # POST https://apb.npci.org.in/mapper/link/1.0/validate
+    # Authorization: Bearer {access_token}
+    # Body: {"aadhaarNumber": "<encrypted>", "referenceNumber": "<uuid>"}
+    #
+    # Or via Account Aggregator (AA) framework:
+    # https://api.sahamati.org.in/aa/v2/accounts/link/token
+
+    return _get_demo_bank()
 
 
 # ── Entry Point ──────────────────────────────────────────────

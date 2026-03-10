@@ -1,90 +1,328 @@
 ﻿# GramSetu v3 🌾
 
-## About the Project
+> **Autonomous AI agent that fills Indian government forms over WhatsApp — in the user''s own language, using their real data from DigiLocker, with zero typing.**
 
-**GramSetu** is an autonomous AI agent designed to bridge the digital divide by helping citizens—especially in rural India—fill out complex government forms directly over WhatsApp. Built for ultimate accessibility, it works on any phone with WhatsApp, requires no app downloads, and demands zero prior knowledge of complex government portals from the user.
-
-A user simply sends a voice or text message on WhatsApp such as *"मुझे राशन कार्ड चाहिए"* (I need a ration card). GramSetu instantly understands the request in their native language, automatically fetches their verified identity documents from DigiLocker, and navigates the actual government portals to fill out the form using live browser automation. The user only needs to verify with an OTP. They never have to manually type their Aadhaar number, address, or any complex document details.
-
-## 🧠 Powered by the Best LLMs
-
-To achieve complete autonomy, **GramSetu relies on the best LLMs for all its processes**. Every single step of the workflow is powered by state-of-the-art models to ensure a frictionless, intelligent, and highly accurate user experience.
-
-- **Lightning-Fast Intent Recognition:** We use highly optimized LLMs (like Llama 3.1 8B) to instantly analyze the user's message and determine the exact government scheme they need.
-- **Multilingual Conversational Intelligence:** Powered by top-tier conversational LLMs (like Mixtral), GramSetu communicates warmly and naturally in 11 different Indian languages.
-- **Advanced Reasoning & Data Extraction:** We utilize the industry's best reasoning models (like Llama 3.3 70B) to parse complex eligibility criteria, cross-reference DigiLocker documents, and extract precise structured data for form-filling.
-- **State-of-the-Art Vision & OCR:** We leverage powerful vision LLMs to read regional text, interpret portal layouts, and handle legacy government websites in real-time.
-- **Robust Voice Processing:** Best-in-class ASR models are deployed to transcribe Indian-accented speech and regional dialects flawlessly.
-
-By deeply integrating the most capable Large Language Models available today, GramSetu successfully transforms a daunting bureaucratic task into a simple, natural, native-language conversation.
+Built for rural India. Works on **any phone with WhatsApp**. No app download. No form knowledge required.
 
 ---
 
-## Repository Structure & Quick Start
+## What It Does
 
-*For full setup details, refer to the included `SERVER_GUIDE.md` and `WHATSAPP_SETUP.md`.*
+A village farmer sends one WhatsApp message: *"राशन कार्ड चाहिए"*  
+GramSetu replies in under 2 seconds, fetches all required data from DigiLocker automatically, fills the government portal form using Playwright (live browser automation visible on screen), handles the OTP, and sends back a confirmation — **the user never types their Aadhaar number, address, or any document numbers**.
+
+---
+
+## Quick Start
 
 ### Prerequisites
-- Python 3.12+
-- Node.js 18+
-- Twilio WhatsApp sandbox (free)
-- NVIDIA NIM API key
 
-### 1. Backend (FastAPI + MCP Servers)
+- Python 3.12+
+- Node.js 18+ (for the webapp)
+- Twilio WhatsApp sandbox (free) or production number
+- NVIDIA NIM API key — free at [build.nvidia.com](https://build.nvidia.com)
+
+### 1 — Backend (FastAPI + MCP Servers)
+
 ```bash
+# Clone
 git clone https://github.com/Vickyrrrrrr/gramsetu.git
 cd gramsetu
+
+# Create venv and install
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 pip install -r requirements.txt
 playwright install chromium
 
-# Copy and configure environment variables
+# Copy and configure environment
 copy .env.example .env
+# → fill in NVIDIA_API_KEY and Twilio keys
 
-# Start everything (FastAPI + all MCP servers)
+# Start everything (FastAPI on :8000 + all 4 MCP servers)
 .\start.ps1 -All
 ```
 
-### 2. Live Preview Web App (Next.js)
+### 2 — Web App (Next.js)
+
 ```bash
 cd webapp
 npm install
-npm run dev    # Opens at http://localhost:3000
+npm run dev    # → http://localhost:3000
+```
+
+### 3 — Environment (`.env`)
+
+```env
+# NVIDIA NIM — ALL LLM inference (no Gemini needed)
+NVIDIA_API_KEY=nvapi-your-key-here
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+
+# Purpose-specific NIM models (all free tier)
+NIM_MODEL_INTENT=meta/llama-3.1-8b-instruct
+NIM_MODEL_CONVERSATIONAL=mistralai/mixtral-8x7b-instruct-v0.1
+NIM_MODEL_EXTRACTION=meta/llama-3.1-70b-instruct
+NIM_MODEL_GENERAL=meta/llama-3.3-70b-instruct
+
+# Twilio (WhatsApp sandbox — free)
+TWILIO_ACCOUNT_SID=ACxxxx
+TWILIO_AUTH_TOKEN=xxxx
+TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
 ```
 
 ---
 
-## ⚠️ Notes on MCP Implementation
+## Supported Forms — 11 Types
 
-GramSetu is built on a future-proof architecture utilizing the Model Context Protocol (MCP). We developed 4 dedicated MCP servers (`browser_mcp`, `digilocker_mcp`, `whatsapp_mcp`, `audit_mcp`) to handle specific tools securely and modularly.
+| Category | Form | Real Portal |
+|---|---|---|
+| Welfare | Ration Card (BPL/APL) | nfsa.gov.in |
+| Welfare | Old Age / Widow / Disability Pension | nsap.nic.in |
+| Welfare | Ayushman Bharat PMJAY (₹5L health cover) | pmjay.gov.in |
+| Welfare | MNREGA Job Card (100 days work) | nrega.nic.in |
+| Identity | PAN Card | onlineservices.nsdl.com |
+| Identity | Voter ID | voters.eci.gov.in |
+| Identity | Caste Certificate (SC/ST/OBC) | services.india.gov.in |
+| Identity | Birth Certificate | crsorgi.gov.in |
+| Agriculture | PM-KISAN Samman Nidhi (₹6000/year) | pmkisan.gov.in |
+| Agriculture | Kisan Credit Card (farm loans) | kisancreditcard.in |
+| Banking | Jan Dhan Account (zero balance) | pmjdy.gov.in |
 
-**Current Demo Limitation:**
-In the current Hackathon demo environment, you may experience issues where the MCP servers are "not working" as expected out-of-the-box (e.g., connection refused, or tools failing to execute). This is due to:
-1. **Local Ports & OS Differences:** The MCP servers run on individual ports (8100-8103) which can sometimes conflict or be blocked by local firewalls on different operating systems.
-2. **Playwright & Headless Modes:** The Browser MCP requires a visible Chrome instance (`headless=False`) for the judges to see the live form auto-filling. Sandboxed or containerized environments often block this.
-3. **API Key Dependencies:** The MCPs rely heavily on valid external keys (DigiLocker Mock OAuth, Twilio, NVIDIA NIMs) that must be precisely configured in the `.env` file. If keys are missing or rate-limited, the specific MCP will fail silently.
-
-**Workaround for Demo:**
-Currently, the core AI agent orchestrator (`graph.py`) has fallback mechanisms to execute the required tools directly if the remote MCP servers cannot be reached, ensuring the demo remains functional. 
+**Adding a new form = 1 Pydantic model + 1 line in `SCHEMA_REGISTRY`.**  
+Voice, validation, DigiLocker auto-fill, and Playwright browser automation work automatically.
 
 ---
 
-## 🚀 From Demo to Live (Production Roadmap)
+## Architecture
 
-To transition GramSetu from a Hackathon prototype to a resilient, nation-wide production system, the following architectural upgrades are planned:
+```
+WhatsApp message (any language)
+         │
+         ▼
+   FastAPI /webhook  ─────────────────────────────────────────────┐
+     (Twilio)          Background task                             │
+         │             Empty TwiML ACK < 1ms                      │
+         ▼                                                         ▼
+   LangGraph v3 State Machine                          4 MCP Tool Servers
+   ┌────────────────────────────────────────────────┐  ┌──────────────────┐
+   │  1. TRANSCRIBE  → NIM parakeet ASR             │  │ WhatsApp  :8100  │
+   │  2. DETECT_INTENT → llama-3.1-8b (fast JSON)   │  │ Browser   :8101  │
+   │  3. DIGILOCKER  → OAuth auto-fetch real data    │  │ Audit     :8102  │
+   │  4. CONFIRM     → User says YES/NO only         │  │ DigiLocker:8103  │
+   │  5. FILL_FORM   → Playwright live browser fill  │  └──────────────────┘
+   └────────────────────────────────────────────────┘
+         │
+         ▼
+   Twilio REST API → WhatsApp reply + OTP request
+```
 
-### 1. Robust Cloud Infrastructure (AWS/GCP)
-- **Containerization:** All MCP servers and the FastAPI backend will be Dockerized and orchestrated via Kubernetes (EKS/GKE) for high availability and auto-scaling.
-- **Microservices Architecture:** Moving from a monolithic local execution to true distributed microservices where MCPs run independently.
-- **Serverless Automation:** Shifting Browser automation (Playwright/Stagehand) to specialized scalable cloud environments (like Browserbase) to handle thousands of concurrent form fills instead of running headful browsers on a single machine.
+### NIM Models — One Per Task
 
-### 2. Security & Compliance
-- **Data Privacy:** Full ISO 27001 & CERT-In compliance. Implementing strict data-at-rest encryption and transient data processing (no PII stored post-session).
-- **Official API Integrations:** Transitioning from Playwright browser-automation (scraping) to official government API gateways (like UMANG APIs or direct state government APIs) for form submissions, ensuring 100% reliability and legal compliance.
-- **Real Auth:** Migrating from mock DigiLocker OAuth to the official UIDAI Aadhaar eKYC and DigiLocker production APIs.
+| Task | Model | Why |
+|---|---|---|
+| Intent classification | `meta/llama-3.1-8b-instruct` | Fastest — JSON output in <0.5s |
+| Conversational replies | `mistralai/mixtral-8x7b-instruct-v0.1` | Best multilingual warmth |
+| Field extraction | `meta/llama-3.1-70b-instruct` | Precise structured output |
+| Scheme research / reasoning | `meta/llama-3.3-70b-instruct` | Best general reasoning |
+| Portal OCR / vision | `nvidia/llama-3.2-90b-vision-instruct` | Hindi text on govt portals |
+| Voice ASR | `nvidia/parakeet-ctc-1.1b-asr` | Indian-accented speech |
 
-### 3. Reliability & Fallbacks
-- **Queueing Systems:** Implementing RabbitMQ/Kafka to handle WhatsApp message spikes and queue form-filling tasks asynchronously.
-- **LLM Redundancy:** Setting up multi-vendor LLM fallback routing (e.g., NVIDIA NIM -> Azure OpenAI -> AWS Bedrock) to ensure 99.9% uptime for intent and extraction models.
-- **Comprehensive Monitoring:** Datadog or Prometheus/Grafana integration for live observability of MCP usage, LLM latency, and form submission success rates.
+---
+
+## Live Browser Preview (Playwright) — ✅ Working
+
+Playwright opens a real Chromium window (`headless=False`) on the laptop when a form is submitted.  
+Judges watch every field typed character-by-character in real time.  
+Simultaneously, JPEG screenshots stream via WebSocket (`/ws/browser/{userId}`) to the web app floating panel.
+
+**What the mock portal looks like:**  
+`http://localhost:8000/static/public/mock_portal.html` — a pixel-faithful GOI portal replica (navy/orange scheme, Ashoka emblem, all 11 form types, DigiLocker connect button, OTP step).
+
+**To verify it works locally:**
+```bash
+# 1. Backend must be running
+python -m whatsapp_bot.main
+
+# 2. Open webapp
+cd webapp && npm run dev
+
+# 3. Go to localhost:3000 → type "I want ration card"
+# 4. Playwright window opens on screen, web app shows live preview
+```
+
+**Known requirements for Playwright to work:**
+- `playwright install chromium` must have been run
+- Backend running on port 8000 (mock portal is served from FastAPI static files)
+- `headless=False` in graph.py line ~737 (already set)
+
+---
+
+## Hackathon Live Demo Setup
+
+**Everything runs on your laptop — no cloud required for the demo.**
+
+```
+Your Laptop
+├── FastAPI + 4 MCP servers  →  localhost:8000
+├── Next.js web app          →  localhost:3000
+└── ngrok tunnel             →  https://xxxx.ngrok-free.app  (WhatsApp webhook only)
+```
+
+**Steps before demo:**
+
+```powershell
+# Terminal 1 — backend
+cd gramsetu
+.venv\Scripts\activate
+.\start.ps1 -All
+
+# Terminal 2 — web app
+cd gramsetu\webapp
+npm run dev
+
+# Terminal 3 — ngrok (for WhatsApp to reach your laptop)
+ngrok http 8000
+# Copy the https URL → Twilio console → WhatsApp sandbox webhook
+```
+
+**Demo script for judges:**
+1. Project `localhost:3000` (web app) on the big screen
+2. Send WhatsApp message from any phone: `"राशन कार्ड चाहिए"`
+3. GramSetu replies in Hindi instantly
+4. Say `"हाँ"` (yes) → Playwright browser opens on laptop — judges see live form fill
+5. Screenshot streams into the web app floating preview panel in real time
+6. Enter the mock OTP → form "submitted" with confirmation message
+
+> ⚠️ Keep laptop plugged in and on a stable WiFi or hotspot. Playwright is CPU-heavy.
+
+---
+
+## Deploying the Web App to Vercel (Backend Stays on Laptop)
+
+**You can deploy Next.js to Vercel, but there are important limitations.**
+
+The `webapp/next.config.js` rewrites `/api/*` and `/ws/*` to `http://localhost:8000`.  
+On Vercel, `localhost` is the Vercel server — not your laptop. You must change it to your ngrok URL.
+
+**Step 1 — Update `webapp/next.config.js`:**
+
+```js
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
+
+const nextConfig = {
+  async rewrites() {
+    return [
+      { source: '/api/:path*', destination: `${BACKEND}/api/:path*` },
+      // ⚠️ Remove the /ws rewrite — Vercel serverless can't proxy WebSockets
+    ]
+  },
+}
+module.exports = nextConfig
+```
+
+**Step 2 — Vercel Environment Variables:**
+```
+NEXT_PUBLIC_BACKEND_URL = https://your-ngrok-url.ngrok-free.app
+```
+
+**Step 3 — Deploy:**
+```bash
+cd webapp
+npx vercel --prod
+```
+
+**What works on Vercel + ngrok backend:**
+| Feature | Works? | Notes |
+|---|---|---|
+| Chat `/api/chat` | ✅ | Via ngrok proxy |
+| Voice input `/api/voice` | ✅ | Via ngrok proxy |
+| MCP status panel | ✅ | Via ngrok proxy |
+| Scheme discovery | ✅ | Via ngrok proxy |
+| Screenshot viewer | ✅ | Static PNG after fill |
+| **Live browser preview WebSocket** | ❌ | Vercel serverless = no WS |
+| **Playwright form fill** | ✅ | Runs on your laptop, not Vercel |
+
+> **For the hackathon demo, running everything on `localhost` is simpler and more reliable.**  
+> Use Vercel only to share a public URL after the event.
+
+---
+
+## Security
+
+- Twilio HMAC signature validation on every webhook
+- AES encryption for PII in transit
+- PII never written to logs — Aadhaar shown as `XXXX-XXXX-1234`
+- Rate limiting: 10 messages/minute per phone number
+- OTP validated as 4–6 digits only before graph resume
+- SQLite checkpoint — sessions survive server restarts
+- `.env` is gitignored — API keys never committed
+
+---
+
+## Voice Support — 11 Indian Languages (FREE, No API Key)
+
+All TTS via Microsoft Edge TTS.
+
+| Language | Code | Female | Male |
+|---|---|---|---|
+| Hindi | `hi` | SwaraNeural | MadhurNeural |
+| Bengali | `bn` | TanishaaNeural | BashkarNeural |
+| Tamil | `ta` | PallaviNeural | ValluvarNeural |
+| Telugu | `te` | ShrutiNeural | MohanNeural |
+| Marathi | `mr` | AarohiNeural | ManoharNeural |
+| Gujarati | `gu` | DhwaniNeural | NiranjanNeural |
+| Kannada | `kn` | SapnaNeural | GaganNeural |
+| Malayalam | `ml` | SobhanaNeural | MidhunNeural |
+| Punjabi | `pa` | OjasNeural | VaaniNeural |
+| Urdu | `ur` | GulNeural | SalmanNeural |
+| English (IN) | `en` | NeerjaNeural | PrabhatNeural |
+
+---
+
+## API Reference
+
+Base URL: `http://localhost:8000`
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/webhook` | Twilio WhatsApp webhook |
+| POST | `/api/chat` | Direct chat API (no WhatsApp needed) |
+| POST | `/api/otp/{user_id}` | Submit OTP to resume suspended form session |
+| POST | `/api/schemes` | Scheme eligibility discovery |
+| POST | `/api/voice` | Audio upload → transcribed text |
+| GET | `/api/mcp-status` | Live status of all 4 MCP servers |
+| GET | `/api/screenshot/{form}/{session}` | Latest Playwright screenshot PNG |
+| GET | `/api/audit-logs` | Full audit trail (PII-redacted) |
+| GET | `/api/health` | Health check + active session count |
+| GET | `/api/impact` | Impact metrics |
+| WS | `/ws/browser/{user_id}` | Live JPEG stream of browser form fill |
+
+---
+
+## Dashboard
+
+```bash
+streamlit run dashboard/app.py
+# → http://localhost:8501
+```
+
+Live conversation log · form submission queue · per-agent latency heatmap · PII access audit trail · district impact counters.
+
+---
+
+## Tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+---
+
+## Project Docs
+
+| File | Content |
+|---|---|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Beginner-friendly explanation of the project structure, demo mode, real mode, servers, and LangGraph flow |
+| [API_GUIDE.md](API_GUIDE.md) | Full API usage with curl examples |
+| [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md) | Twilio sandbox + ngrok setup |
+| [SERVER_GUIDE.md](SERVER_GUIDE.md) | All server processes, ports, troubleshooting |

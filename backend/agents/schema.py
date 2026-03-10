@@ -72,11 +72,15 @@ class GramSetuState(TypedDict, total=False):
     response: str               # Message to send to user
     confirmation_summary: str   # Human-readable form summary
     otp_value: str              # OTP received from user (temp only)
+    digilocker_auth_status: str
+    receipt_ready: bool
+    reference_number: str
 
     # ── Browser State ────────────────────────────────────────
     browser_launched: bool
     portal_url: str
     screenshot_b64: str         # Latest screenshot for VLM
+    screenshot_path: str
     otp_field_position: dict    # {"x": int, "y": int}
 
     # ── Timing ───────────────────────────────────────────────

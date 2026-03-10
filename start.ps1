@@ -1,13 +1,17 @@
 ﻿# ============================================================
 # GramSetu -- One-Click Startup Script (Windows PowerShell)
 # ============================================================
-# Run from project root: .\start.ps1
-# Optional flags:
-#   .\start.ps1 -Ngrok      # also start ngrok tunnel
-#   .\start.ps1 -Dashboard  # also start Streamlit dashboard
-#   .\start.ps1 -Webapp     # also start Next.js web app
-#   .\start.ps1 -All        # start everything
-#   .\start.ps1 -Prod       # disable hot-reload (stable for demos)
+# Run from project root:
+#   .\start.ps1            # Start server (MCP servers embedded in-process)
+#   .\start.ps1 -Ngrok     # + ngrok tunnel for Twilio
+#   .\start.ps1 -Dashboard # + Streamlit dashboard
+#   .\start.ps1 -Webapp    # + Next.js web app
+#   .\start.ps1 -All       # Everything
+#   .\start.ps1 -Prod      # Disable hot-reload (stable for demos)
+#
+# NOTE: MCP servers (WhatsApp / Browser / Audit / DigiLocker) are now
+# started AUTOMATICALLY as in-process threads when the FastAPI server
+# boots. You do NOT need -MCP flag anymore.
 # ============================================================
 
 param(
@@ -45,19 +49,12 @@ Write-Host "[Setup] Dependencies OK" -ForegroundColor Green
 New-Item -ItemType Directory -Force -Path "$ROOT\data\voice_cache" | Out-Null
 New-Item -ItemType Directory -Force -Path "$ROOT\data\screenshots"  | Out-Null
 
-# -- MCP Servers (optional) --------------------------------------------------
+# -- MCP Servers — auto-started by FastAPI (no separate processes needed) ----
 if ($MCP -or $All) {
     Write-Host ""
-    Write-Host "[MCP] Starting all 4 MCP tool servers..." -ForegroundColor Cyan
-    Start-Process -NoNewWindow -FilePath $PYTHON -ArgumentList "-m backend.mcp_servers.whatsapp_mcp"   -WorkingDirectory $ROOT
-    Start-Process -NoNewWindow -FilePath $PYTHON -ArgumentList "-m backend.mcp_servers.audit_mcp"      -WorkingDirectory $ROOT
-    Start-Process -NoNewWindow -FilePath $PYTHON -ArgumentList "-m backend.mcp_servers.browser_mcp"    -WorkingDirectory $ROOT
-    Start-Process -NoNewWindow -FilePath $PYTHON -ArgumentList "-m backend.mcp_servers.digilocker_mcp" -WorkingDirectory $ROOT
-    Write-Host "[MCP] WhatsApp  --> http://localhost:8100" -ForegroundColor Green
-    Write-Host "[MCP] Browser   --> http://localhost:8101" -ForegroundColor Green
-    Write-Host "[MCP] Audit     --> http://localhost:8102" -ForegroundColor Green
-    Write-Host "[MCP] DigiLock  --> http://localhost:8103" -ForegroundColor Green
-    Start-Sleep 2
+    Write-Host "[MCP] MCP servers start AUTOMATICALLY inside the backend." -ForegroundColor Green
+    Write-Host "[MCP] No separate processes are needed." -ForegroundColor Green
+    Write-Host "[MCP] (WhatsApp:8100, Browser:8101, Audit:8102, DigiLocker:8103)" -ForegroundColor Gray
 }
 
 # -- ngrok tunnel (optional) -------------------------------------------------
@@ -112,16 +109,27 @@ if ($Dashboard -or $All) {
 # -- FastAPI Server (foreground, blocking) ------------------------------------
 Write-Host ""
 Write-Host "[Server] Starting GramSetu FastAPI server..." -ForegroundColor Cyan
+Write-Host "  MCP servers will auto-start inside the process" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "  Swagger UI:  http://localhost:8000/docs"                           -ForegroundColor White
 Write-Host "  Chat API:    POST http://localhost:8000/api/chat"                  -ForegroundColor White
 Write-Host "  WhatsApp:    POST http://localhost:8000/webhook"                   -ForegroundColor White
 Write-Host "  Health:      http://localhost:8000/api/health"                     -ForegroundColor White
+Write-Host "  MCP Status:  http://localhost:8000/api/mcp-status"                 -ForegroundColor White
 Write-Host "  Web App:     http://localhost:3000  (start with -Webapp)"          -ForegroundColor White
 Write-Host "  Mock Portal: http://localhost:8000/static/public/mock_portal.html" -ForegroundColor White
 Write-Host ""
 Write-Host "  Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
+
+# -- Check .env exists -------------------------------------------------------
+if (-not (Test-Path (Join-Path $ROOT ".env"))) {
+    Write-Host "[WARNING] .env file not found!" -ForegroundColor Red
+    Write-Host "  Copy .env.example to .env and add your API keys:" -ForegroundColor Yellow
+    Write-Host "    GROQ_API_KEY   = from https://console.groq.com" -ForegroundColor Yellow
+    Write-Host "    NVIDIA_API_KEY = from https://build.nvidia.com" -ForegroundColor Yellow
+    Write-Host ""
+}
 
 Set-Location $ROOT
 
@@ -132,7 +140,7 @@ if ($Prod -or $All) {
 }
 else {
     Write-Host "  [DEV]  Hot-reload ON -- code changes auto-restart server"         -ForegroundColor DarkGray
-    Write-Host "  TIP:   For hackathon demo use: .\start.ps1 -Prod -Ngrok -Webapp"  -ForegroundColor DarkGray
+    Write-Host "  TIP:   For demos use: .\start.ps1 -Prod -Ngrok -Webapp"           -ForegroundColor DarkGray
     Write-Host ""
     & $PYTHON -m uvicorn whatsapp_bot.main:app --host 0.0.0.0 --port 8000 --reload
 }

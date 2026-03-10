@@ -1,316 +1,513 @@
-# GramSetu — Full Architecture & Component Guide
+# GramSetu Architecture Guide
 
-> **Current state:** You're running the webapp with hardcoded/demo data.  
-> This document explains every component you've built but aren't fully using yet, and exactly what each unlocks.
+This document explains the project in plain language.
 
----
+If you only want the short version:
 
-## The Two Modes: What You Have vs What's Built
+- The web app on port 3000 is the frontend.
+- The FastAPI app on port 8000 is the real backend brain.
+- The LangGraph flow inside the backend decides what step comes next.
+- The MCP servers are helper services that the backend starts automatically.
+- The folder name `whatsapp_bot` is historical. Today it contains the main backend server, not a separate always-running WhatsApp-only app.
+- In demo mode, some parts are real and some parts are mocked.
 
-```
-RIGHT NOW (demo mode)
-─────────────────────────────────────────────────────────────
-User types in webapp  →  /api/chat  →  LangGraph v3 graph
-                                              │
-                                    DigiLocker: MOCK data
-                                    Form fill: REAL Playwright
-                                    LLM: keyword fallback only
-                                    WhatsApp: not connected
+## 1. What This Project Is
 
-FULL SYSTEM (when wired up)
-─────────────────────────────────────────────────────────────
-User speaks on WhatsApp  →  Twilio  →  /webhook  →  LangGraph
-                                              │
-                                    DigiLocker: REAL OAuth data
-                                    Form fill: REAL Playwright
-                                    LLM: NVIDIA NIM (Llama 3.1)
-                                    MCP servers: all 4 running
-```
+GramSetu is an AI assistant for government form filling.
 
----
+The idea is:
 
-## 1. LangGraph v3 Pipeline (`backend/agents/graph.py`)
+1. A user says something like `I want ration card`.
+2. The system identifies the form.
+3. It fetches user data.
+4. It shows the extracted data for confirmation.
+5. It fills the portal automatically.
+6. It asks for OTP.
+7. It submits the application and gives a receipt.
 
-**What it is:** The brain. A 5-node state machine that runs every user request through a structured, resumable pipeline.
+That is the business idea.
 
-**You ARE using this** — it runs whenever the webapp calls `/api/chat`.
+## 2. The Most Important Thing To Understand
 
-### The 5 Nodes
+There are two different views of this project:
 
-| Node | What it does | Currently |
-|------|-------------|-----------|
-| **TRANSCRIBE** | Converts voice note → text via NVIDIA NeMo ASR | ✅ Active (text messages bypass it) |
-| **DETECT_INTENT** | Classifies: ration card / PM-KISAN / pension / etc. | ✅ Active (keyword-based fallback) |
-| **DIGILOCKER_FETCH** | Pulls Aadhaar, PAN, address from DigiLocker OAuth | ⚠️ Uses hardcoded demo data |
-| **CONFIRM** | Shows data summary, waits for user YES/NO | ✅ Active |
-| **FILL_FORM** | Playwright opens portal, fills every field, handles OTP | ✅ Active |
+1. What the project does today in your local demo.
+2. What the project is designed to do in a real production scenario.
 
-### The Key Power: OTP Suspend/Resume
+Those are not exactly the same.
 
-LangGraph checkpoints state to SQLite. When the form needs an OTP:
-1. Graph **suspends** mid-execution
-2. User receives OTP on phone, replies
-3. Graph **resumes from exact checkpoint** — portal is still open
+## 3. Demo Mode vs Real Mode
 
-This is why `data/checkpoints.db` exists. Without it, you'd lose the browser session on every message.
+### Demo Mode: what happens today
 
----
+Today, when you run the project locally, the main path is:
 
-## 2. MCP Servers (`backend/mcp_servers/`)
-
-**What they are:** 4 microservices that run as independent HTTP servers on ports 8100–8103. The LangGraph graph talks to them via the MCP (Model Context Protocol) — basically a standardized tool-calling interface.
-
-### Why this architecture?
-
-Instead of one giant script, each capability is isolated. You can restart/upgrade one server without touching the others. Think of them like specialist workers the LangGraph "manager" calls.
-
-### WhatsApp MCP (Port 8100) — `whatsapp_mcp.py`
-
-**Unlocks:** Real WhatsApp integration
-
-Currently, your webapp manually calls Twilio via `main.py`. The WhatsApp MCP handles:
-- Receiving Twilio webhooks (incoming WhatsApp messages)
-- Sending replies back via Twilio API
-- Detecting OTP messages (e.g., user replies "456321")
-- Downloading and staging voice note audio files
-- Twilio HMAC signature validation (security)
-
-**Without it:** You can only test via the webapp — real WhatsApp users can't reach GramSetu.
-
-**With it:** Any WhatsApp user in India can message your Twilio number and interact fully.
-
----
-
-### Browser MCP (Port 8101) — `browser_mcp.py`
-
-**Unlocks:** Advanced Playwright with VLM vision guidance
-
-Currently, `graph.py` runs Playwright directly using CSS selectors (`[name="field_name"]`). The Browser MCP adds:
-- **Vision LLM (VLM) navigation**: Takes a screenshot, asks NVIDIA's vision model "where is the date of birth field?" and clicks it — works even when portals change their HTML
-- **Screenshot streaming**: Sends live Playwright frames to the webapp's WebSocket (the `/ws/browser/{session_id}` endpoint)
-- Handles CAPTCHAs, page loading waits, and portal-specific quirks
-
-**Without it:** Works for portals with predictable HTML. Breaks when portals change structure.
-
-**With it:** Resilient to portal redesigns. VLM "reads" the page visually just like a human would.
-
----
-
-### Audit MCP (Port 8102) — `audit_mcp.py`
-
-**Unlocks:** The Streamlit dashboard becoming useful
-
-Currently, the Streamlit dashboard (`dashboard/app.py`) mostly shows empty data. The Audit MCP:
-- Logs every agent action with structured data: `{timestamp, user_id, node, latency_ms, confidence, pii_touched}`
-- PII-redacts before storing (Aadhaar shown as `XXXX-XXXX-1234`)
-- Writes to `data/audit.db` (separate from `checkpoints.db`)
-- Powers `/api/audit-logs` endpoint that the dashboard polls
-
-**Without it:** Dashboard shows no real metrics. You can't tell how many forms were filled, which fields fail, or latency per node.
-
-**With it:** Real-time admin view — see every user session, every field filled, success/failure rates.
-
----
-
-### DigiLocker MCP (Port 8103) — `digilocker_mcp.py`
-
-**Unlocks:** Real Aadhaar/PAN data — the core of the autonomous flow
-
-This is the most important one for going from demo → real.
-
-Currently, `DIGILOCKER_FETCH` node in `graph.py` calls `_get_demo_data()` which returns hardcoded:
-```python
-{"name": "रामेश कुमार", "aadhaar": "XXXX-XXXX-1234", "dob": "15/08/1975", ...}
+```text
+Browser -> Next.js web app -> FastAPI backend -> LangGraph -> mock DigiLocker data -> real Playwright on mock portal
 ```
 
-The DigiLocker MCP replaces this with real OAuth 2.0:
-1. Generates OAuth login URL for the user (send via WhatsApp)
-2. User logs into DigiLocker on their phone
-3. MCP receives the auth code callback
-4. Exchanges code → access token
-5. Fetches Aadhaar eKYC XML → parses name, DOB, address, photo
-6. Fetches PAN data, income certificates
-7. Returns structured data to the graph → form fills with REAL data
+What is real in demo mode:
 
-**Without it:** Every form fills with demo data ("Ramesh Kumar"). Useless in production.
+- The web app is real.
+- The FastAPI backend is real.
+- The LangGraph orchestration is real.
+- The step-by-step conversation state is real.
+- The Playwright browser automation is real.
+- The screenshot streaming is real.
+- The OTP pause/resume behavior is real.
+- The receipt generation is real.
 
-**With it:** Every form fills with the actual user's verified government data. This is what makes GramSetu truly zero-typing and impossible to get wrong.
+What is mocked or simplified in demo mode:
 
----
+- DigiLocker data is mock data unless real OAuth is wired.
+- The government portal is a mock HTML portal served locally.
+- The photo verification step is currently a UX step, not a real face-matching system.
+- Real WhatsApp webhook delivery is not the primary active path in the current backend file.
 
-## 3. `agent_core/` — The v2 Legacy System
+### Real Mode: what the full product should do
 
-**What it is:** The original agent before LangGraph was added. A simpler single-function pipeline.
+In the real scenario, the target path is:
 
-```python
-# main.py line 37:
-from agent_core.agents import process_message as v2_process_message
+```text
+WhatsApp user -> Twilio or Meta webhook -> FastAPI backend -> LangGraph -> real DigiLocker OAuth -> real government portal -> OTP -> submitted application
 ```
 
-**Where it's used:** `main.py` imports it as a fallback. If `USE_V3_GRAPH=false` in `.env`, it runs instead of the LangGraph graph.
+In real mode:
 
-### v2 vs v3 comparison
+- User starts from WhatsApp instead of the web app.
+- Identity/document data comes from real DigiLocker APIs.
+- The system talks to real government portals, not the local mock portal.
+- OTP goes to the user's real phone number.
+- The final receipt corresponds to a real submission.
 
-| | v2 (agent_core/) | v3 (backend/agents/graph.py) |
+## 4. High-Level System Diagram
+
+```text
+                           +-----------------------+
+                           |   Next.js Web App     |
+                           |   port 3000           |
+                           +-----------+-----------+
+                                       |
+                                       | /api/* and /ws/* proxy
+                                       v
+ +--------------------+     +-----------------------+     +----------------------+
+ |  Optional WhatsApp | --> | FastAPI Backend       | --> | LangGraph Flow       |
+ |  Channel           |     | whatsapp_bot/main.py  |     | backend/agents       |
+ |  Twilio or Meta    |     | port 8000             |     |                      |
+ +--------------------+     +-----------+-----------+     +----------+-----------+
+                                         |                            |
+                                         | auto-starts                |
+                                         v                            v
+                             +-----------------------+     +----------------------+
+                             | MCP helper servers    |     | Playwright browser   |
+                             | 8100 to 8103          |     | automation           |
+                             +-----------------------+     +----------------------+
+```
+
+## 5. Main Folders and What They Mean
+
+### `webapp/`
+
+This is the Next.js frontend.
+
+What it does:
+
+- Shows the chat UI.
+- Sends user messages to `/api/chat`.
+- Shows screenshots and receipt buttons.
+- Connects to WebSocket preview for live browser frames.
+
+This is what you see in the browser at `http://localhost:3000`.
+
+### `whatsapp_bot/`
+
+This name is confusing, so here is the correct interpretation:
+
+- It is not a separate permanently independent service in the current setup.
+- It is the Python package that contains the main FastAPI backend server.
+- The file `whatsapp_bot/main.py` is the actual backend app you run.
+
+So when you start the backend, you are really starting:
+
+```text
+whatsapp_bot/main.py
+```
+
+Why is it called `whatsapp_bot` then?
+
+- Because the project originally centered around WhatsApp interaction.
+- The package name stayed, even though the backend now also powers the web app, TTS, screenshots, receipts, scheme discovery, and status APIs.
+
+### `backend/agents/`
+
+This is the orchestration brain.
+
+Key files:
+
+- `graph.py`: the LangGraph workflow.
+- `schema.py`: state structure and graph status values.
+
+### `backend/mcp_servers/`
+
+These are helper servers started by the backend.
+
+They are not the main app. They are support services.
+
+### `dashboard/`
+
+Optional Streamlit dashboard for admin/inspection use.
+
+### `data/`
+
+Local runtime storage.
+
+Important contents:
+
+- `data/checkpoints.db`: LangGraph checkpoint database.
+- `data/screenshots/`: browser screenshots.
+- `data/voice_cache/`: temporary voice files.
+
+## 6. What LangGraph Is Doing Here
+
+If you are new, think of LangGraph as a workflow engine for conversations.
+
+Normal code often does this:
+
+```text
+message in -> function runs once -> result out
+```
+
+LangGraph instead does this:
+
+```text
+message in -> step 1 -> pause -> user reply -> step 2 -> pause -> user reply -> step 3
+```
+
+That is why it fits this project.
+
+Form filling is not one answer. It is a multi-step process.
+
+### The main graph states
+
+The graph uses statuses like:
+
+- `active`: keep running to the next node
+- `wait_user`: stop and wait for a general reply
+- `wait_confirm`: stop and wait for user confirmation
+- `wait_otp`: stop and wait for OTP
+- `completed`: flow finished
+- `error`: something failed
+
+### The current flow in this project
+
+Today the graph behaves like this:
+
+1. Detect form intent.
+2. Stop and ask for photo verification step.
+3. Continue to DigiLocker fetch.
+4. Show extracted data summary.
+5. Wait for `YES` or corrections.
+6. Fill the portal with Playwright.
+7. Show screenshot and ask for OTP.
+8. Resume after OTP.
+9. Generate receipt.
+
+### Why checkpoints matter
+
+When the graph pauses, it saves state in `data/checkpoints.db`.
+
+That means the system can remember:
+
+- which form the user selected
+- what data was extracted
+- whether the user is at confirmation stage
+- whether the system is waiting for OTP
+
+Without checkpoints, OTP flows would break easily.
+
+## 7. The Actual Runtime Flow in Demo Mode
+
+When you type in the web app, this is what happens:
+
+```text
+1. User types in browser.
+2. Next.js page sends POST /api/chat.
+3. FastAPI endpoint in whatsapp_bot/main.py receives it.
+4. Backend calls process_message() in backend/agents/graph.py.
+5. LangGraph loads or creates session state.
+6. Graph runs until it reaches a wait state or completion.
+7. Backend returns response JSON.
+8. Web app shows the assistant message.
+9. If there is a screenshot, the UI shows it.
+10. If the flow is completed, the UI shows a receipt button.
+```
+
+## 8. The Current Step-by-Step Behavior
+
+If the user types `ration card`, the current intended flow is:
+
+### Step 1 of 4: identity verification
+
+The graph detects the form and asks for a selfie or `continue`.
+
+Important truth:
+
+- Right now this is mostly a guided step in the conversation.
+- It is not yet a real biometric face verification pipeline.
+
+### Step 2 of 4: data verification
+
+The system gets form data and shows a summary.
+
+Today:
+
+- The extraction is real as a flow.
+- The data source is still demo/mock unless real DigiLocker integration is completed.
+
+### Step 3 of 4: portal fill
+
+The system launches Playwright and fills fields.
+
+Today:
+
+- This is real browser automation.
+- But it fills the local mock portal for the demo path.
+
+### Step 4 of 4: completion
+
+After OTP, the system marks the submission completed and generates a receipt.
+
+## 9. Demo vs Real, Subsystem by Subsystem
+
+| Part | Demo today | Real target |
 |---|---|---|
-| Architecture | Single function | 5-node state machine |
-| OTP resume | ❌ No | ✅ Yes (SQLite checkpoints) |
-| DigiLocker | Hardcoded | Pluggable (MCP) |
-| LLM | NVIDIA NIM | Keyword + NIM fallback |
-| Voice | Basic handler | NeMo ASR node |
-| Confidence scoring | ❌ | ✅ per field |
+| User channel | Web app on port 3000 | WhatsApp plus web app |
+| Backend | FastAPI on port 8000 | Same FastAPI backend |
+| Conversation engine | LangGraph | Same LangGraph |
+| Photo verification | Prompt only | Real verification service or vision pipeline |
+| DigiLocker | Mock data | Real OAuth + document fetch |
+| Portal | Local mock portal | Real government portals |
+| Browser automation | Real Playwright | Real Playwright or stronger browser tooling |
+| OTP | Real pause/resume logic, demo submission | Real pause/resume with real submission |
+| Receipt | Real local receipt HTML | Real production receipt or acknowledgment |
 
-**Should you keep it?** Keep it as long as you want a fallback. Once v3 is stable (real DigiLocker + live WhatsApp), you can remove `agent_core/` and the fallback import.
+## 10. What Each Server Does
 
----
+### Server 1: Next.js web app, port 3000
 
-## 4. `whatsapp_bot/main.py` — The FastAPI Server
+Purpose:
 
-You ARE using this — it's the server the webapp calls. But several endpoints are dormant:
+- visual interface for the user
+- chat window
+- screenshot modal
+- receipt button
 
-| Endpoint | Status | What it does when live |
-|----------|--------|------------------------|
-| `POST /webhook` | ⚠️ Unused (no Twilio) | Real WhatsApp message intake |
-| `POST /api/otp-resume` | ⚠️ Waiting | Resumes graph after user sends OTP |
-| `GET /api/schemes` | ✅ Used | Returns eligible schemes list |
-| `POST /api/chat` | ✅ Used | Webapp chat messages |
-| `WS /ws/browser/{id}` | ✅ Connected | Live Playwright screenshots |
-| `GET /api/screenshot/...` | ✅ Available | Static screenshot serving |
-| `POST /api/voice` | ✅ Available | Audio → NeMo transcription |
-| `GET /api/audit-logs` | ⚠️ Empty | Needs Audit MCP running |
-| `GET /api/mcp-status` | ✅ Works | Probes all 4 MCP ports |
+It does not contain the main business logic.
 
-### ngrok Bypass Middleware (added)
+It mostly forwards requests to the backend.
 
-Twilio's servers don't send a browser `User-Agent`, so ngrok's free-tier intercepts their webhook POSTs with a browser challenge HTML page. To fix this, `main.py` includes `NgrokBypassMiddleware` which adds `ngrok-skip-browser-warning: true` to all responses, telling ngrok's edge to pass requests through without the challenge.
+### Server 2: FastAPI backend, port 8000
 
-Also configure ngrok with a named tunnel (`inspect: false`) in `ngrok.yml`:
+This is the most important server.
 
-```yaml
-tunnels:
-  gramsetu:
-    proto: http
-    addr: 8000
-    inspect: false
-```
-Then start with: `ngrok start gramsetu`
+It does all of this:
 
----
+- receives web app requests
+- manages sessions
+- runs the LangGraph flow
+- generates receipts
+- serves screenshots
+- exposes health and status endpoints
+- auto-starts MCP helper servers
 
-## 5. `backend/llm_client.py` — The LLM Layer
+This is the real center of the system.
 
-Currently, intent detection mostly runs on keywords (for speed and reliability). The LLM client is built but underused.
+### Server 3 to 6: MCP helper servers, ports 8100 to 8103
 
-### 4 Specialized Models (NVIDIA NIM)
+These are started inside the backend process as daemon threads.
 
-| Purpose | Model | Currently |
-|---------|-------|-----------|
-| Intent detection | `meta/llama-3.1-8b-instruct` | ⚠️ Keyword fallback used |
-| Conversational replies | `meta/llama-3.3-70b-instruct` | ✅ Used for scheme text |
-| Field extraction | `meta/llama-3.1-8b-instruct` | ⚠️ Direct parse used |
-| General reasoning | `nvidia/llama-3.1-nemotron-70b` | ⚠️ Rarely called |
+That means:
 
-**To enable:** Set `NVIDIA_API_KEY` in `.env`. Get a free key at [build.nvidia.com](https://build.nvidia.com).
+- you usually do not start them manually anymore
+- when the backend starts, they try to start too
 
-Edge cases where LLM matters vs keywords:
-- "Meri maa ko pension chahiye jo widow hai" → LLM detects `widow_pension`, keywords miss
-- "PM ke kisan wala scheme" → LLM understands, keywords might not
-- Multi-intent: "Ration card aur voter ID dono chahiye" → LLM handles gracefully
+#### WhatsApp MCP, port 8100
 
----
+Purpose:
 
-## 6. `backend/security.py` — PII Protection
+- helper layer for WhatsApp-related tooling
+- future integration point for real messaging operations
 
-Built but mostly dormant in demo mode.
+#### Browser MCP, port 8101
 
-What it does when active:
-- **AES-256 encryption** of Aadhaar/PAN before writing to DB
-- **Input sanitization** — strips script injection, validates phone formats
-- **Rate limiting** — blocks >5 requests/minute from same number
-- **Session cleanup** — wipes PII from memory after form submission
+Purpose:
 
-**Relevant for production**: Required for DPDP Act compliance (India's data protection law).
+- helper layer for browser-related actions
+- useful if you want tool-based browser automation outside the main graph
 
----
+#### Audit MCP, port 8102
 
-## 7. `dashboard/app.py` — Streamlit Admin Dashboard
+Purpose:
 
-**Access:** `http://localhost:8501` (when Streamlit is running)
+- audit trail and observability support
+- useful for logging and admin views
 
-Currently shows mostly empty/demo data. Full power requires Audit MCP running:
+#### DigiLocker MCP, port 8103
 
-- **Live session map**: See every active user → current node in pipeline
-- **Form fill success rate**: Which forms succeed, which fail, latency per node
-- **PII audit log**: What data was touched, for whom, when (redacted)
-- **Screenshot gallery**: Last Playwright screenshot per session
-- **WebSocket viewer**: Live browser stream embedded in dashboard
+Purpose:
 
----
+- helper layer for DigiLocker flows
+- today can provide demo data
+- in real mode should handle real document fetch and related tooling
 
-## Activation Checklist (Demo → Real)
+### Optional dashboard server
 
-```
-Step 1 — Enable real LLMs
-  □ Get NVIDIA NIM API key from build.nvidia.com (free tier available)
-  □ Add NVIDIA_API_KEY=nvapi-... to .env
+If you run Streamlit, that becomes an extra UI for monitoring.
 
-Step 2 — Enable real DigiLocker
-  □ Register at developers.digilocker.gov.in
-  □ Add DIGILOCKER_CLIENT_ID, DIGILOCKER_CLIENT_SECRET to .env
-  □ Change _get_demo_data() call in graph.py to hit DigiLocker MCP
+## 11. Important Clarification About the WhatsApp Path
 
-Step 3 — Enable WhatsApp
-  □ Get a Twilio account → WhatsApp sandbox or paid WABA number
-  □ Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER to .env
-  □ Run ngrok / deploy to get a public URL
-  □ Set Twilio webhook → https://your-url.com/webhook
+You asked why there is a separate `whatsapp_bot` if there is also a web app.
 
-Step 4 — Run all MCP servers
-  □ .\start_mcp.ps1  (starts all 4 on ports 8100-8103)
-  □ Verify with GET /api/mcp-status
+The answer is:
 
-Step 5 — Full project start
-  □ .\start.ps1 -All
+- `whatsapp_bot` is the backend package name.
+- The current active demo path is web app to backend.
+- The original product vision was WhatsApp-first.
+- So the naming stayed even though the backend now serves much more than WhatsApp.
+
+In other words:
+
+```text
+webapp is the frontend
+whatsapp_bot/main.py is the backend server
 ```
 
-Each step unlocks a new layer of the system. Steps 1–2 alone make the NLP and data-filling production-grade. Steps 3–4 open the WhatsApp channel.
+They are connected directly.
 
----
+## 12. APIs You Actually Use Today
 
-*Read `SCALING.md` for database migration, Docker deployment, and cloud hosting after these are working.*
+These are the important backend endpoints in the current codebase.
 
----
+| Method | Endpoint | What it does |
+|---|---|---|
+| POST | `/api/chat` | main chat entry for the web app |
+| POST | `/api/voice` | speech upload to text |
+| POST | `/api/otp/{user_id}` | resumes flow after OTP |
+| POST | `/api/schemes` | scheme discovery |
+| POST | `/api/tts` | text to speech |
+| POST | `/api/status` | simple application status response |
+| GET | `/api/impact` | counters and usage info |
+| GET | `/api/health` | health check |
+| GET | `/api/mcp-status` | tells you if MCP servers are up |
+| GET | `/api/receipt/{session_id}` | printable receipt HTML |
+| GET | `/api/screenshot/{form_type}/{session_id}` | screenshot image |
+| GET | `/api/audit-logs` | audit data |
+| GET | `/callback/digilocker` | DigiLocker OAuth callback endpoint |
+| WS | `/ws/browser/{session_id}` | live browser preview |
 
-## WhatsApp Provider Options
+## 13. What Happens When You Start the Project
 
-If Twilio sandbox limits are blocking development (error 63038 = daily cap), here are alternatives:
+### If you run `start_demo.ps1`
 
-| Provider | Cost | Daily Limit | Notes |
-|---|---|---|---|
-| **Twilio Sandbox** | Free | ~10 conversations | Easiest to start, resets every 24h |
-| **Meta Cloud API** | Free | None | Official, recommended upgrade path |
-| **360dialog** | ~€49/mo | None | India-focused production option |
-| **whatsapp-web.js** | Free (unofficial) | None | Your own SIM, no business account needed, demo use only |
+This script opens two windows:
 
-> Switching to **Meta Cloud API** requires only a new webhook endpoint that parses JSON (Meta format) instead of form-data (Twilio format). All backend graph logic stays identical.
+1. backend window
+2. webapp window
 
----
+The backend window runs `uvicorn whatsapp_bot.main:app`.
 
-## Troubleshooting
+When backend startup happens, this is the order:
 
-### `ModuleNotFoundError: No module named 'whatsapp_bot'`
-Always run from inside the `gramsetu/gramsetu/` subfolder, not the repo root:
-```powershell
-cd gramsetu\gramsetu
-python -m whatsapp_bot.main
+1. `.env` is loaded.
+2. database is initialized.
+3. FastAPI app starts on port 8000.
+4. static files are mounted.
+5. MCP helper servers are started in background threads.
+6. API endpoints become available.
+
+The web app window runs `npm run dev` and serves the UI on port 3000.
+
+### If you run `start.ps1`
+
+This is the more flexible script.
+
+Examples:
+
+- `./start.ps1`: backend only
+- `./start.ps1 -Webapp`: backend plus web app
+- `./start.ps1 -All`: backend plus everything optional
+- `./start.ps1 -Prod`: backend without hot reload
+
+Important current behavior:
+
+- MCP servers are auto-started by backend startup.
+- `-MCP` no longer needs to launch separate processes.
+
+## 14. Why So Many Processes Can Feel Confusing
+
+This project mixes several layers:
+
+- frontend UI
+- backend API
+- graph orchestration
+- browser automation
+- optional MCP helpers
+- optional dashboard
+
+So if you just look at ports and windows, it can feel random.
+
+The correct mental model is simpler:
+
+```text
+User UI -> FastAPI backend -> LangGraph -> helpers -> browser automation -> response back to UI
 ```
 
-### Twilio error 63038 on outbound replies
-Twilio sandbox has a daily unique-conversation limit. **Wait 24 hours** or switch to Meta Cloud API.
+Everything else is support around that path.
 
-### WhatsApp messages received by Twilio but bot never replies
-Check in order:
-1. Is ngrok running? (`http://localhost:4040`)
-2. Is the webhook URL in Twilio sandbox settings pointing to `https://<ngrok-url>/webhook`?
-3. Is the backend running on port 8000? (`GET http://localhost:8000/api/health`)
-4. Has your phone joined the sandbox? (Send `join <keyword>` to `+14155238886`)
+## 15. The Single Best Way To Think About The Structure
+
+If you remember only one thing, remember this:
+
+- The web app is just the screen.
+- FastAPI is the server.
+- LangGraph is the step controller.
+- Playwright is the hands that fill the form.
+- DigiLocker is the data source.
+- MCP servers are helper workers.
+
+## 16. What Is Still Not Fully Real Yet
+
+To avoid confusion, here is the honest list of what still needs real-world completion:
+
+1. Real WhatsApp webhook path needs to be the active production entry path.
+2. Photo verification needs real matching logic if that is a hard product requirement.
+3. DigiLocker needs full real OAuth plus document fetch.
+4. Real government portals need stable automation beyond the mock portal path.
+5. Production deployment needs public hosting, secrets, monitoring, and failure handling.
+
+## 17. Practical Mental Model For You
+
+When you are debugging, ask these questions in this order:
+
+1. Is the web app loading on port 3000?
+2. Is the backend healthy on port 8000?
+3. Is `/api/chat` returning responses?
+4. Is LangGraph moving through the expected statuses?
+5. Is Playwright opening and filling?
+6. Is the screenshot or receipt reaching the UI?
+7. Are MCP helper servers up if that part matters?
+
+That order will save you a lot of confusion.
+
+## 18. Recommended Reading Order
+
+If you want to understand the code slowly, read in this order:
+
+1. `webapp/app/app/page.tsx`
+2. `whatsapp_bot/main.py`
+3. `backend/agents/schema.py`
+4. `backend/agents/graph.py`
+5. `backend/mcp_servers/`
+6. `DIGILOCKER_INTEGRATION.md`
+
+That goes from easiest mental model to deepest implementation details.

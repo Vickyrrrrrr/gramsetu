@@ -1,6 +1,6 @@
 # ============================================================
-# GramSetu v3 — 2026 Production Dependencies
-# Autonomous WhatsApp Agent for Rural India
+# GramSetu v3 — Production Dependencies
+# AI Government Forms Assistant (Web + Voice)
 # ============================================================
 
 # ── Orchestration (LangGraph Multi-Agent State Machine) ──────
@@ -26,10 +26,9 @@ edge-tts>=7.0.0                       # Free TTS via Microsoft Edge voices
 playwright>=1.49.0                    # Govt portal form-filling
 Pillow>=11.0.0                        # Screenshot processing for VLM
 
-# ── WhatsApp Integration (Twilio + FastAPI) ──────────────────
+# ── Web Framework (FastAPI + Uvicorn) ────────────────────────
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
-twilio>=9.4.0
 python-multipart>=0.0.20              # Form data / file uploads
 
 # ── ASR & Speech (NVIDIA NeMo via NIM) ──────────────────────
