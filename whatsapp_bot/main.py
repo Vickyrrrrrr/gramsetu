@@ -726,13 +726,35 @@ async def get_audit_logs(token: str = "", limit: int = 100):
 # ---------------------------------------------------------------------------
 # LANDING PAGE
 # ---------------------------------------------------------------------------
-@app.get("/")
-async def landing_page():
+@app.get("/presentation")
+async def presentation_slides():
+    """Serve the slides HTML for the demo."""
     index_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse("<h1>GramSetu v3 Running</h1>")
+    return HTMLResponse("<h1>Slides not found</h1>")
+
+@app.get("/")
+async def landing_page():
+    """Professional API landing page."""
+    return HTMLResponse("""
+    <html><head><style>
+        body { font-family: 'Inter', system-ui, sans-serif; background: #F7F6F3; color: #0C0C0C; display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; }
+        .card { background: white; border: 1px solid #E5E5E0; border-radius: 16px; padding: 40px; box-shadow: 0 4px 24px rgba(0,0,0,0.05); }
+        h1 { font-style: italic; font-family: 'Instrument Serif', serif; font-size: 32px; margin-bottom: 10px; }
+        p { color: #6B6B6B; margin-bottom: 24px; }
+        a { background: #0C0C0C; color: #F7F6F3; text-decoration: none; padding: 10px 20px; border-radius: 99px; font-weight: 500; display: inline-block; margin: 10px; transition: opacity 0.2s; }
+        a:hover { opacity: 0.8; }
+    </style></head><body>
+        <div class="card">
+            <h1>GramSetu Backend 🌾</h1>
+            <p>The AI Government Forms Engine is active and healthy.</p>
+            <a href="/docs">📜 API Documentation</a>
+            <a href="/presentation">📽️ View Presentation</a>
+        </div>
+    </body></html>
+    """)
 
 
 # ---------------------------------------------------------------------------
