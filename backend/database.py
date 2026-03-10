@@ -15,8 +15,8 @@ import json
 import os
 from datetime import datetime
 
-# Database file path — sits in the data/ folder
-DB_PATH = os.path.join(os.path.dirname(__file__), "gramsetu.db")
+# Database file path — sits in the data/ folder for persistence
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "gramsetu.db")
 
 
 def get_connection():

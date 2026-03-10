@@ -38,7 +38,7 @@ load_dotenv()
 
 from whatsapp_bot.voice_handler import transcribe_audio
 from whatsapp_bot.language_utils import detect_language
-import data.db as db
+from backend import database as db
 
 from backend.agents.graph import process_message as v3_process_message
 from backend.agents.schema import GraphStatus
