@@ -1,4 +1,4 @@
-﻿"""
+"""
 ============================================================
 main.py -- GramSetu Web API Server (v3)
 ============================================================
@@ -47,6 +47,11 @@ from backend.orchestrator.models import GraphStatus
 from backend.integrations.security import api_limiter, sanitize_input, validate_otp_input
 from backend.integrations.schemes import discover_schemes
 from backend.integrations.voice import text_to_speech
+from backend.services.session_store import (
+    get_chat_session,
+    save_chat_session,
+    save_completed_session,
+)
 
 settings = get_settings()
 
@@ -76,15 +81,13 @@ _impact: ImpactStats = {
 
 async def _store_session_state(session_key: str, payload: dict, ttl: int = 3600):
     try:
-        cache = get_cache()
-        await cache.set_json(f"session:{session_key}", payload, ttl=ttl)
+        await save_chat_session(session_key, payload, ttl=ttl)
     except Exception:
         pass
 
 async def _get_session_state(session_key: str):
     try:
-        cache = get_cache()
-        return await cache.get_json(f"session:{session_key}")
+        return await get_chat_session(session_key)
     except Exception:
         return None
 
@@ -125,6 +128,7 @@ async def startup():
     try:
         await cache.ping()
         print("[Cache] Redis/in-memory cache ready")
+        print("[Sessions] Chat sessions now use cache-backed persistence")
     except Exception as e:
         print(f"[Cache] cache unavailable: {e}")
 
@@ -553,6 +557,7 @@ async def ready():
         "status": "ready" if cache_ok else "degraded",
         "cache": cache_ok,
         "db": True,
+        "metrics": settings.metrics_enabled,
     }
 
 @app.get("/api/health")
