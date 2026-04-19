@@ -1,1 +1,3 @@
-"""API package for request-layer helpers and future route modules."""
+"""API entrypoints for GramSetu backend."""
+
+from .app import app
