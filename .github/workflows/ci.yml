@@ -60,6 +60,15 @@ jobs:
             echo "No tests present, skipping pytest"
           fi
 
+  workflow-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Lint GitHub Actions workflows
+        uses: rhysd/actionlint@v1
+
   container-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -82,7 +91,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Validate Compose with example env
+      - name: Prepare CI env file
         run: |
-          if [ -f .env.example ]; then cp .env.example .env.ci; else touch .env.ci; fi
-          GRAFANA_ADMIN_USER=admin GRAFANA_ADMIN_PASSWORD=admin docker compose --env-file .env.ci config
+          if [ -f .env.example ]; then cp .env.example .env; else touch .env; fi
+          cat >> .env <<'EOF'
+          GRAFANA_ADMIN_USER=admin
+          GRAFANA_ADMIN_PASSWORD=admin
+          EOF
+
+      - name: Validate Compose
+        env:
+          GRAFANA_ADMIN_USER: admin
+          GRAFANA_ADMIN_PASSWORD: admin
+        run: docker compose config
