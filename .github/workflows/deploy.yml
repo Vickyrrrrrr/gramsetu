@@ -15,36 +15,11 @@ jobs:
   deploy:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: production
+    timeout-minutes: 10
 
     steps:
-      - name: Validate deploy secrets
+      - name: Deployment mode notice
         run: |
-          [ -n "${{ secrets.DEPLOY_HOST }}" ] || (echo "Missing DEPLOY_HOST" && exit 1)
-          [ -n "${{ secrets.DEPLOY_USER }}" ] || (echo "Missing DEPLOY_USER" && exit 1)
-          [ -n "${{ secrets.DEPLOY_SSH_KEY }}" ] || (echo "Missing DEPLOY_SSH_KEY" && exit 1)
-
-      - name: Deploy over SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT || 22 }}
-          script: |
-            set -e
-            APP_DIR="${{ secrets.DEPLOY_APP_DIR }}"
-            if [ -z "$APP_DIR" ]; then APP_DIR="$HOME/gramsetu"; fi
-            mkdir -p "$APP_DIR"
-            cd "$APP_DIR"
-            if [ ! -d .git ]; then
-              git clone --branch main https://github.com/Vickyrrrrrr/gramsetu.git .
-            else
-              git fetch origin main
-              git checkout main
-              git reset --hard origin/main
-            fi
-            docker compose pull
-            docker compose up -d --remove-orphans
-            docker image prune -f
+          echo "GitHub deploy over SSH disabled."
+          echo "This repository is deployed on Railway, so SSH-based server deployment is not required."
+          echo "Use Railway's GitHub integration or add a Railway-specific deploy action later if needed."
