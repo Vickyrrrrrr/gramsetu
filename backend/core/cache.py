@@ -26,6 +26,10 @@ class InMemoryCache:
     async def ping(self) -> bool:
         return True
 
+    async def delete(self, key: str):
+        self._data.pop(key, None)
+        return True
+
     async def close(self):
         return None
 
@@ -51,6 +55,10 @@ class RedisCache:
             return bool(await self.client.ping())
         except Exception:
             return False
+
+    async def delete(self, key: str):
+        await self.client.delete(key)
+        return True
 
     async def close(self):
         await self.client.aclose()
