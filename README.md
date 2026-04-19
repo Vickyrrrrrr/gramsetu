@@ -13,6 +13,19 @@ GramSetu replies in under 2 seconds, fetches all required data from DigiLocker a
 
 ---
 
+## Reliability Layer (v2)
+
+GramSetu v2 adds a deterministic safety layer before any live form submission:
+
+- **Normalization first**: values are cleaned into canonical formats before validation.
+- **Rule-based validation**: Aadhaar, PAN, mobile, PIN code, DOB and more are validated in pure Python.
+- **Cross-field checks**: contradictory values (for example, invalid mobile prefixes or identical applicant/guardian names) are blocked before automation.
+- **Final submission gate**: browser automation only starts if required fields are present and the form passes deterministic checks.
+- **Human review guard**: low-confidence extraction, OTP steps, or edits to sensitive PII require explicit review.
+- **Dry-run browser plan**: the agent can generate a fill plan before touching the real government portal.
+
+This architecture reduces hallucinations by making the LLM responsible for extraction and language understanding, while deterministic code owns correctness and submission safety.
+
 ## Quick Start
 
 ### Prerequisites

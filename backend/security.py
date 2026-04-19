@@ -255,3 +255,21 @@ def cleanup_expired_sessions(sessions: dict, max_age_hours: int = 24) -> int:
         del sessions[k]
 
     return len(expired)
+
+
+# ============================================================
+# 5. Human review guardrails
+# ============================================================
+
+def require_human_review(confidence: float | None = None, has_otp: bool = False, pii_fields_changed: bool = False, consistency_errors: list | None = None) -> dict:
+    """Decide whether the system may continue automatically."""
+    reasons = []
+    if confidence is None or confidence < 0.98:
+        reasons.append("confidence_below_threshold")
+    if has_otp:
+        reasons.append("otp_requires_explicit_confirmation")
+    if pii_fields_changed:
+        reasons.append("pii_changed_after_prefill")
+    if consistency_errors:
+        reasons.append("cross_field_validation_failed")
+    return {"allowed": len(reasons) == 0, "reasons": reasons}
