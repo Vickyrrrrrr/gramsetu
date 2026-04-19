@@ -520,3 +520,5 @@ docker compose --profile observability up --build
 ## Ongoing API split
 
 The API split is being done safely in phases. `backend/api/routes/health.py` is now extracted first while the remaining routes stay in `backend/api/app.py` until they are moved one by one.
+
+The phased API split continues: `backend/api/routes/voice.py` has now been extracted for voice input and TTS endpoints.
