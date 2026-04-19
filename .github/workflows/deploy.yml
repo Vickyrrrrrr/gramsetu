@@ -16,8 +16,15 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: production
 
     steps:
+      - name: Validate deploy secrets
+        run: |
+          [ -n "${{ secrets.DEPLOY_HOST }}" ] || (echo "Missing DEPLOY_HOST" && exit 1)
+          [ -n "${{ secrets.DEPLOY_USER }}" ] || (echo "Missing DEPLOY_USER" && exit 1)
+          [ -n "${{ secrets.DEPLOY_SSH_KEY }}" ] || (echo "Missing DEPLOY_SSH_KEY" && exit 1)
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -31,7 +38,6 @@ jobs:
             if [ -z "$APP_DIR" ]; then APP_DIR="$HOME/gramsetu"; fi
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
-
             if [ ! -d .git ]; then
               git clone --branch main https://github.com/Vickyrrrrrr/gramsetu.git .
             else
@@ -39,7 +45,6 @@ jobs:
               git checkout main
               git reset --hard origin/main
             fi
-
             docker compose pull
             docker compose up -d --remove-orphans
             docker image prune -f
