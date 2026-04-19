@@ -16,8 +16,8 @@ Schemas:
 """
 
 import re
-from datetime import date, datetime
-from typing import Optional, Literal, Annotated
+from datetime import date
+from typing import Optional, Literal
 from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -714,7 +714,7 @@ def validate_partial_form(form_type: str, data: dict) -> dict:
                     # Create minimal valid-ish data to trigger field validator
                     test_data = {field_name: value}
                     # Use model_construct to skip required fields, then manually call validator
-                    obj = schema.model_construct(**test_data)
+                    schema.model_construct(**test_data)
                     # If we got here without error, the value is structurally ok
                     # But we also need to run field validators explicitly
                     # Re-validate by checking field-specific patterns
