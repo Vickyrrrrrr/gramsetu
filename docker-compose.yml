@@ -1,5 +1,9 @@
 version: "3.9"
 
+# Default startup brings up the real backend workflow:
+# backend + redis + prometheus + grafana
+# Add --profile fullstack for the Next.js UI and --profile devtools for Redis Commander.
+
 services:
   gramsetu-redis:
     image: redis:7-alpine
