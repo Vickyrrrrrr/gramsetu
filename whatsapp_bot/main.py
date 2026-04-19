@@ -72,6 +72,22 @@ _impact: ImpactStats = {
     "users_served": set(),
 }
 
+
+
+async def _store_session_state(session_key: str, payload: dict, ttl: int = 3600):
+    try:
+        cache = get_cache()
+        await cache.set_json(f"session:{session_key}", payload, ttl=ttl)
+    except Exception:
+        pass
+
+async def _get_session_state(session_key: str):
+    try:
+        cache = get_cache()
+        return await cache.get_json(f"session:{session_key}")
+    except Exception:
+        return None
+
 # ---------------------------------------------------------------------------
 # FastAPI App
 # ---------------------------------------------------------------------------
@@ -93,6 +109,9 @@ app.add_middleware(
 STATIC_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+if settings.metrics_enabled:
+    instrument_fastapi(app)
+
 
 # ---------------------------------------------------------------------------
 # Startup
@@ -102,6 +121,12 @@ async def startup():
     if sys.stdout.encoding != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     db.init_db()
+    cache = get_cache()
+    try:
+        await cache.ping()
+        print("[Cache] Redis/in-memory cache ready")
+    except Exception as e:
+        print(f"[Cache] cache unavailable: {e}")
 
     from backend.llm_client import _groq_ok, _nim_ok, GROQ_MODEL_MAIN
     groq_status   = "OK Groq"   if _groq_ok() else "NO KEY Groq"
@@ -125,6 +150,11 @@ async def startup():
     print(f"  Schemes:    POST /api/schemes")
     print(f"  Impact:     GET  /api/impact")
     print("=" * 60 + "\n")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    await close_cache()
 
     _start_mcp_servers()
 
@@ -507,6 +537,24 @@ async def get_graph_state(user_id: str):
 # ---------------------------------------------------------------------------
 # HEALTH
 # ---------------------------------------------------------------------------
+
+@app.get("/live")
+async def live():
+    return {"status": "alive"}
+
+@app.get("/ready")
+async def ready():
+    cache_ok = False
+    try:
+        cache_ok = await get_cache().ping()
+    except Exception:
+        cache_ok = False
+    return {
+        "status": "ready" if cache_ok else "degraded",
+        "cache": cache_ok,
+        "db": True,
+    }
+
 @app.get("/api/health")
 async def health():
     from backend.llm_client import _groq_ok, _nim_ok
