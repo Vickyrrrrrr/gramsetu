@@ -29,7 +29,6 @@ from dotenv import load_dotenv
 from backend.core import get_settings
 from backend.core.cache import get_cache, close_cache
 from backend.core.metrics import instrument_fastapi
-from backend.api.routes.health import router as health_router
 from backend.api.routes.voice import router as voice_router
 from backend.api.routes.chat import router as chat_router
 from backend.api.routes.services import router as services_router
@@ -50,7 +49,19 @@ from backend.services.session_store import (
     save_completed_session,
 )
 
+load_dotenv()
 settings = get_settings()
+
+# Session + impact tracking (in-memory; resets on server restart)
+_user_sessions = {}
+_completed_forms = {}
+_impact = {
+    "forms_filled": 0,
+    "schemes_discovered": 0,
+    "otp_handled": 0,
+    "voice_notes_processed": 0,
+    "users_served": set(),
+}
 
 # ---------------------------------------------------------------------------
 # Session + impact tracking (in-memory; resets on server restart)
@@ -94,6 +105,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 if settings.metrics_enabled:
     instrument_fastapi(app)
 
+from backend.api.routes.health import router as health_router
 app.include_router(health_router)
 app.include_router(voice_router)
 app.include_router(chat_router)
