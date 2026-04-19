@@ -551,3 +551,27 @@ This branch now includes GitHub Actions workflows under `.github/workflows/`:
 - `DEPLOY_SSH_KEY`
 - `DEPLOY_PORT` (optional)
 - `DEPLOY_APP_DIR` (optional)
+
+
+## Production infrastructure
+
+The repository now uses a production-oriented setup with:
+
+- modular FastAPI route layout under `backend/api/routes/`
+- Docker Compose for backend, Redis, Prometheus, Grafana, and optional frontend/devtools
+- GitHub Actions CI for lint, compile, test, and container validation
+- GHCR image publishing on pushes to `main`
+- SSH-based production deployment workflow
+
+### Required GitHub Actions secrets
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PORT` (optional)
+- `DEPLOY_APP_DIR` (optional)
+
+### Recommended environment variables
+
+- `GRAFANA_ADMIN_USER`
+- `GRAFANA_ADMIN_PASSWORD`
