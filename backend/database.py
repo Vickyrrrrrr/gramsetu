@@ -196,8 +196,10 @@ def get_pending_submissions():
         d = dict(r)
         for key in ["form_data", "confidence_scores", "validation_result"]:
             if d.get(key):
-                try: d[key] = json.loads(d[key])
-                except: pass
+                try:
+                    d[key] = json.loads(d[key])
+                except json.JSONDecodeError:
+                    pass
         result.append(d)
     return result
 
@@ -238,8 +240,10 @@ def get_all_submissions():
         d = dict(r)
         for key in ["form_data", "confidence_scores", "validation_result"]:
             if d.get(key):
-                try: d[key] = json.loads(d[key])
-                except: pass
+                try:
+                    d[key] = json.loads(d[key])
+                except json.JSONDecodeError:
+                    pass
         result.append(d)
     return result
 
@@ -253,8 +257,10 @@ def get_session(user_id: str):
     conn.close()
     if row:
         d = dict(row)
-        try: d["context"] = json.loads(d["context"])
-        except: d["context"] = {}
+        try:
+            d["context"] = json.loads(d["context"])
+        except json.JSONDecodeError:
+            d["context"] = {}
         return d
     return None
 
