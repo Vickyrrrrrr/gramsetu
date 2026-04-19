@@ -157,11 +157,15 @@ def get_audit_logs(limit: int = 100):
     for r in rows:
         d = dict(r)
         if d.get("input_data"):
-            try: d["input_data"] = json.loads(d["input_data"])
-            except: pass
+            try:
+                d["input_data"] = json.loads(d["input_data"])
+            except json.JSONDecodeError:
+                pass
         if d.get("output_data"):
-            try: d["output_data"] = json.loads(d["output_data"])
-            except: pass
+            try:
+                d["output_data"] = json.loads(d["output_data"])
+            except json.JSONDecodeError:
+                pass
         result.append(d)
     return result
 
