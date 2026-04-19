@@ -94,6 +94,48 @@ docker compose --profile fullstack up --build
 
 The backend exposes port `8000`, persists runtime state in the `gramsetu_data` volume, and includes a healthcheck against `/api/health` for container orchestration.
 
+
+## How GramSetu Works
+
+GramSetu follows a real production flow built for low-friction public-service access:
+
+1. **User starts in web app or WhatsApp** — a citizen asks for a service in natural language or voice.
+2. **Intent + language detection** — the backend identifies the required form, scheme, or service.
+3. **Data collection and prefilling** — the system gathers available user details and prepares structured form data.
+4. **Deterministic safety checks** — normalization, field validation, cross-field consistency checks, and low-confidence detection run before live automation.
+5. **Human review gate** — risky or incomplete cases are paused for review instead of silently submitting bad data.
+6. **Dry-run fill plan** — GramSetu generates a planned field-by-field browser action sequence.
+7. **Live portal automation** — only validated submissions continue to browser automation and OTP handling.
+8. **Receipt and state tracking** — application progress, reference numbers, and session state are persisted for recovery.
+9. **Observability** — metrics flow to Prometheus and dashboards appear in Grafana for backend visibility.
+
+This keeps the LLM responsible for understanding and extraction, while deterministic code owns correctness, reliability, and submission safety.
+
+## Deploy and Run
+
+Backend only:
+
+```bash
+cp .env.example .env
+docker compose up --build gramsetu-backend gramsetu-redis
+```
+
+Full stack with monitoring:
+
+```bash
+cp .env.example .env
+docker compose --profile fullstack --profile observability up --build
+```
+
+Useful endpoints after startup:
+
+- API health: `http://localhost:8000/api/health`
+- Liveness: `http://localhost:8000/live`
+- Readiness: `http://localhost:8000/ready`
+- Metrics: `http://localhost:8000/metrics`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001`
+
 ## Quick Start
 
 ### Prerequisites
