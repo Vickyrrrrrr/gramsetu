@@ -10,6 +10,9 @@ class Settings:
     headless_browser: bool = os.getenv("HEADLESS_BROWSER", "true").lower() in {"1", "true", "yes"}
     use_stagehand: bool = os.getenv("USE_STAGEHAND", "false").lower() in {"1", "true", "yes"}
     api_base_url: str = os.getenv("API_BASE_URL", "http://localhost:8000")
+    redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    metrics_enabled: bool = os.getenv("METRICS_ENABLED", "true").lower() in {"1", "true", "yes"}
+    environment: str = os.getenv("ENVIRONMENT", "development")
 
 def get_settings() -> Settings:
     return Settings()

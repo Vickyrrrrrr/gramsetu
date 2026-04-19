@@ -1,6 +1,21 @@
 version: "3.9"
 
 services:
+  gramsetu-redis:
+    image: redis:7-alpine
+    container_name: gramsetu-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   gramsetu-backend:
     build:
       context: .
@@ -13,8 +28,13 @@ services:
       HOST: 0.0.0.0
       PORT: 8000
       HEADLESS_BROWSER: "true"
+      REDIS_URL: redis://gramsetu-redis:6379/0
+      METRICS_ENABLED: "true"
     ports:
       - "8000:8000"
+    depends_on:
+      gramsetu-redis:
+        condition: service_healthy
     volumes:
       - gramsetu_data:/app/data
     healthcheck:
@@ -39,5 +59,37 @@ services:
       - "3000:3000"
     profiles: ["fullstack"]
 
+  gramsetu-prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: gramsetu-prometheus
+    restart: unless-stopped
+    depends_on:
+      gramsetu-backend:
+        condition: service_healthy
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    profiles: ["observability", "full"]
+
+  gramsetu-grafana:
+    image: grafana/grafana:11.1.4
+    container_name: gramsetu-grafana
+    restart: unless-stopped
+    depends_on:
+      - gramsetu-prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3001:3000"
+    profiles: ["observability", "full"]
+
 volumes:
   gramsetu_data:
+  redis_data:
+  grafana_data:

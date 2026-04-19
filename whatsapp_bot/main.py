@@ -31,6 +31,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from backend.core import get_settings
+from backend.core.cache import get_cache, close_cache
+from backend.core.metrics import instrument_fastapi
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,6 +47,8 @@ from backend.orchestrator.models import GraphStatus
 from backend.integrations.security import api_limiter, sanitize_input, validate_otp_input
 from backend.integrations.schemes import discover_schemes
 from backend.integrations.voice import text_to_speech
+
+settings = get_settings()
 
 # ---------------------------------------------------------------------------
 # Session + impact tracking (in-memory; resets on server restart)

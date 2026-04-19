@@ -407,3 +407,26 @@ python -m pytest tests/ -v
 | [API_GUIDE.md](API_GUIDE.md) | Full API usage with curl examples |
 | [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md) | Twilio sandbox + ngrok setup |
 | [SERVER_GUIDE.md](SERVER_GUIDE.md) | All server processes, ports, troubleshooting |
+
+
+## Free-now infrastructure
+
+GramSetu v2 is now set up for a **free-first deployment path**:
+
+- Backend runs in a single Python container.
+- Redis is included for future-safe caching and session coordination.
+- Prometheus and Grafana are wired through Docker Compose for observability.
+- The backend still falls back safely if Redis is unavailable, which helps on low-cost or local setups.
+
+Useful commands:
+
+```bash
+# Backend + Redis only
+docker compose up --build gramsetu-backend gramsetu-redis
+
+# Add web app
+docker compose --profile fullstack up --build
+
+# Add monitoring stack
+docker compose --profile observability up --build
+```
