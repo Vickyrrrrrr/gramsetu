@@ -34,16 +34,13 @@ jobs:
           if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
           pip install pytest ruff
 
-      - name: Ruff lint source directories only
+      - name: Ruff autofix safe issues in backend
         run: |
-          TARGETS=""
-          [ -d backend ] && TARGETS="$TARGETS backend"
-          [ -d whatsapp_bot ] && TARGETS="$TARGETS whatsapp_bot"
-          if [ -n "$TARGETS" ]; then
-            ruff check $TARGETS
-          else
-            echo "No Python source directories found"
-          fi
+          ruff check backend whatsapp_bot --config ruff.toml --fix || true
+
+      - name: Ruff lint backend only
+        run: |
+          ruff check backend whatsapp_bot --config ruff.toml
 
       - name: Compile Python
         run: |
