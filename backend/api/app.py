@@ -21,6 +21,7 @@ Application assembly module for GramSetu. Imported by whatsapp_bot.main.
 
 import os
 import sys
+from fastapi import FastAPI
 
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,7 +29,6 @@ from dotenv import load_dotenv
 from backend.core import get_settings
 from backend.core.cache import get_cache, close_cache
 from backend.core.metrics import instrument_fastapi
-from backend.api.state import settings
 from backend.api.routes.health import router as health_router
 from backend.api.routes.voice import router as voice_router
 from backend.api.routes.chat import router as chat_router
