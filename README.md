@@ -26,6 +26,20 @@ GramSetu v2 adds a deterministic safety layer before any live form submission:
 
 This architecture reduces hallucinations by making the LLM responsible for extraction and language understanding, while deterministic code owns correctness and submission safety.
 
+
+## Edge Cases Covered in v2
+
+GramSetu v2 adds explicit protection for common failure modes in AI-assisted form filling:
+
+- malformed Aadhaar, PAN, phone, PIN code, email and DOB values
+- contradictory values across fields
+- duplicate values copied into multiple fields
+- low-confidence field extraction
+- missing required values before submission
+- risky automation without human review
+
+The goal is simple: the LLM may suggest values, but deterministic code decides whether submission is safe.
+
 ## Quick Start
 
 ### Prerequisites

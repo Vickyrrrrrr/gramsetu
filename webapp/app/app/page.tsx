@@ -82,6 +82,41 @@ const LANG_MAP: Record<string, { flag: string; name: string }> = {
 
 const MAX_STORED_MSGS = 50
 
+function SafetyBanner() {
+  const checks = [
+    'Every field is normalized before validation',
+    'Low-confidence AI extraction forces human review',
+    'Missing required fields block submission',
+    'Cross-field mismatches are flagged before automation',
+    'Live browser fill uses a dry-run plan first',
+  ]
+
+  return (
+    <section className="mb-6 rounded-3xl border border-emerald-200/70 bg-emerald-50 px-5 py-4 text-sm text-emerald-950 shadow-sm">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-emerald-700">Reliability mode</p>
+          <h2 className="mt-1 text-lg font-semibold">Submission is blocked until safety checks pass.</h2>
+          <p className="mt-1 max-w-2xl text-emerald-900/80">
+            GramSetu v2 now validates risky fields, highlights contradictions, and asks for review before it touches a live government portal.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-emerald-300/70 bg-white/80 px-3 py-2 text-xs font-medium text-emerald-800">
+          Dry-run first · Human review for risky flows
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {checks.map((item) => (
+          <div key={item} className="rounded-2xl border border-emerald-200/80 bg-white px-3 py-2 text-[13px] text-emerald-950/85">
+            {item}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+
 /* ═══════════════════════════════════════════════════════════════
    HELPERS
    ═══════════════════════════════════════════════════════════════ */

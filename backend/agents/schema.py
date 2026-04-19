@@ -76,6 +76,13 @@ class GramSetuState(TypedDict, total=False):
     receipt_ready: bool
     reference_number: str
 
+    # ── Reliability Layer ─────────────────────────────────────
+    review_required: bool
+    review_reasons: list
+    review_checklist: list
+    risk_flags: list
+    safe_fill_plan: list
+
     # ── Browser State ────────────────────────────────────────
     browser_launched: bool
     portal_url: str

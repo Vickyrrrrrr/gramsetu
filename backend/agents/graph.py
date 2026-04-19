@@ -42,6 +42,10 @@ from backend.agents.schema import (
     get_required_fields,
     validate_partial_form,
 )
+from backend.reliability import (
+    build_safe_submission_decision,
+    generate_review_checklist,
+)
 
 load_dotenv()
 
@@ -75,6 +79,36 @@ _FORM_INTENT_KEYWORDS = {
     "scheme", "yojana", "योजना",
     "help", "start", "hello", "hi", "namaste", "नमस्ते",
 }
+
+
+
+# ============================================================
+# Reliability guard — deterministic safety before automation
+# ============================================================
+def _apply_reliability_checks(state: GramSetuState) -> GramSetuState:
+    form_type = state.get("form_type", "") or "generic"
+    form_data = state.get("form_data", {}) or {}
+    confidence_scores = state.get("confidence_scores", {}) or {}
+    required_fields = get_required_fields(form_type) if form_type else []
+
+    decision = build_safe_submission_decision(
+        form_type=form_type,
+        payload=form_data,
+        confidence_scores=confidence_scores,
+        required_fields=required_fields,
+    )
+
+    state["form_data"] = decision["normalized"]
+    state["validation_errors"] = decision["errors"]
+    state["missing_fields"] = decision["missing"]
+    state["review_required"] = decision["review_required"]
+    state["review_reasons"] = decision["review_reasons"]
+    state["risk_flags"] = decision["risk_flags"]
+    state["review_checklist"] = generate_review_checklist(
+        form_type, decision["normalized"], required_fields, decision["risk_flags"]
+    )
+    state["safe_fill_plan"] = decision["fill_plan"]
+    return state
 
 # ── Checkpoint Database ──────────────────────────────────────
 CHECKPOINT_DB = os.path.join(
