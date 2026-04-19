@@ -1,4 +1,4 @@
-﻿"""
+"""
 ============================================================
 llm_client.py — Multi-Provider LLM Client (Production)
 ============================================================
@@ -54,8 +54,8 @@ NIM_MODEL_VISION  = os.getenv("NIM_MODEL_VISION",  "nvidia/llama-3.2-11b-vision-
 NIM_MODEL_GENERAL = os.getenv("NIM_MODEL_GENERAL", "meta/llama-3.1-8b-instruct")
 
 # Legacy aliases kept for external imports
-NVIDIA_MODEL         = NIM_MODEL_GENERAL
-GROQ_MODEL           = GROQ_MODEL_MAIN
+NVIDIA_MODEL             = NIM_MODEL_GENERAL
+GROQ_MODEL               = GROQ_MODEL_MAIN
 NIM_MODEL_INTENT         = NIM_MODEL_GENERAL
 NIM_MODEL_CONVERSATIONAL = NIM_MODEL_GENERAL
 NIM_MODEL_EXTRACTION     = NIM_MODEL_GENERAL
@@ -186,6 +186,61 @@ async def chat(
     if result:
         return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
+
+
+async def detect_intent(text: str) -> str:
+    """
+    Detect user intent from a message.
+    Returns a short label e.g. 'ration_card', 'pension', 'greeting', 'query', 'complaint'.
+    Falls back to keyword matching when no LLM key is configured.
+    """
+    if not _groq_ok() and not _nim_ok():
+        return _intent_keyword_fallback(text)
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are an intent classifier for a rural Indian government services chatbot. "
+                "Classify the user message into exactly ONE intent label from this list: "
+                "greeting, ration_card, pension, pm_kisan, health_scheme, identity, "
+                "form_fill, query, complaint, eligibility_check, status_check, other. "
+                "Reply with ONLY the label — no explanation, no punctuation."
+            ),
+        },
+        {"role": "user", "content": text},
+    ]
+    result = await _groq_call(GROQ_MODEL_FAST, messages, 0.0, 32)
+    if result:
+        return result.strip().lower()
+    result = await _nim_call(NIM_MODEL_GENERAL, messages, 0.0, 32)
+    if result:
+        return result.strip().lower()
+    return _intent_keyword_fallback(text)
+
+
+def _intent_keyword_fallback(text: str) -> str:
+    """Keyword-based intent detection when no LLM API key is set."""
+    lower = text.lower()
+    if any(w in lower for w in ["hello", "hi", "namaste", "namaskar"]):
+        return "greeting"
+    if any(w in lower for w in ["ration", "rashan", "bpl", "antyodaya"]):
+        return "ration_card"
+    if any(w in lower for w in ["pension", "old age", "vridha"]):
+        return "pension"
+    if any(w in lower for w in ["kisan", "farmer", "krishi"]):
+        return "pm_kisan"
+    if any(w in lower for w in ["pan", "voter", "aadhaar", "aadhar"]):
+        return "identity"
+    if any(w in lower for w in ["health", "ayushman", "hospital"]):
+        return "health_scheme"
+    if any(w in lower for w in ["status", "track", "application"]):
+        return "status_check"
+    if any(w in lower for w in ["eligible", "qualify", "laabh"]):
+        return "eligibility_check"
+    if any(w in lower for w in ["complaint", "problem", "issue", "shikayat"]):
+        return "complaint"
+    return "query"
 
 
 async def chat_vision(
