@@ -70,8 +70,10 @@ def _nim_ok() -> bool:
 
 
 def get_active_provider() -> str:
-    if _groq_ok(): return "groq"
-    if _nim_ok():  return "nvidia"
+    if _groq_ok():
+        return "groq"
+    if _nim_ok():
+        return "nvidia"
     return "fallback"
 
 
