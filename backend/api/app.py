@@ -21,13 +21,7 @@ Application assembly module for GramSetu. Imported by whatsapp_bot.main.
 
 import os
 import sys
-import asyncio
-import tempfile
-from typing import TypedDict
 
-import uvicorn
-from fastapi import FastAPI, Request, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
