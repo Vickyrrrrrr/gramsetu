@@ -522,3 +522,15 @@ docker compose --profile observability up --build
 The API split is being done safely in phases. `backend/api/routes/health.py` is now extracted first while the remaining routes stay in `backend/api/app.py` until they are moved one by one.
 
 The phased API split continues: `backend/api/routes/voice.py` has now been extracted for voice input and TTS endpoints.
+
+
+## Backend modularization progress
+
+The API layer is now split into focused route modules:
+
+- `backend/api/routes/health.py`
+- `backend/api/routes/voice.py`
+- `backend/api/routes/chat.py`
+- `backend/api/routes/services.py`
+
+`backend/api/app.py` now acts mainly as the application assembly layer.
