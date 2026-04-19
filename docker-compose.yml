@@ -70,9 +70,9 @@ services:
       - "--config.file=/etc/prometheus/prometheus.yml"
     volumes:
       - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
     ports:
       - "9090:9090"
-    profiles: ["observability", "full"]
 
   gramsetu-grafana:
     image: grafana/grafana:11.1.4
@@ -90,9 +90,22 @@ services:
       - ./deploy/grafana/provisioning/dashboards/json:/etc/grafana/provisioning/dashboards/json:ro
     ports:
       - "3001:3000"
-    profiles: ["observability", "full"]
+
+  gramsetu-redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: gramsetu-redis-commander
+    restart: unless-stopped
+    depends_on:
+      gramsetu-redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOSTS: local:gramsetu-redis:6379
+    ports:
+      - "8081:8081"
+    profiles: ["devtools"]
 
 volumes:
   gramsetu_data:
   redis_data:
   grafana_data:
+  prometheus_data:
