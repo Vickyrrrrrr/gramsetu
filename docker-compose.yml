@@ -85,6 +85,9 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: admin
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./deploy/grafana/provisioning/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./deploy/grafana/provisioning/dashboards/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml:ro
+      - ./deploy/grafana/provisioning/dashboards/json:/etc/grafana/provisioning/dashboards/json:ro
     ports:
       - "3001:3000"
     profiles: ["observability", "full"]
