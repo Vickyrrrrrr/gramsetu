@@ -112,6 +112,16 @@ GramSetu follows a real production flow built for low-friction public-service ac
 This keeps the LLM responsible for understanding and extraction, while deterministic code owns correctness, reliability, and submission safety.
 
 
+
+## Entrypoint refactor
+
+The runtime entrypoint is now intentionally thin:
+
+- `backend/api/app.py` contains the assembled FastAPI application.
+- `whatsapp_bot/main.py` is now only a stable launcher for Docker and local CLI usage.
+
+This makes it easier to keep the deployment command stable while continuing to split routes and orchestration logic into smaller backend modules.
+
 ## Workflow Startup
 
 The default Docker workflow now starts the full backend runtime needed for GramSetu's real flow:
