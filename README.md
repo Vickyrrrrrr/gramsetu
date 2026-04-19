@@ -111,6 +111,39 @@ GramSetu follows a real production flow built for low-friction public-service ac
 
 This keeps the LLM responsible for understanding and extraction, while deterministic code owns correctness, reliability, and submission safety.
 
+
+## Workflow Startup
+
+The default Docker workflow now starts the full backend runtime needed for GramSetu's real flow:
+
+- `gramsetu-backend` for API, orchestration, OTP flow, and browser automation.
+- `gramsetu-redis` for cache, chat-session persistence, and short-lived workflow state.
+- `gramsetu-prometheus` for metrics scraping.
+- `gramsetu-grafana` for dashboards.
+
+Start the core workflow:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Start the core workflow plus the web app:
+
+```bash
+docker compose --profile fullstack up --build
+```
+
+Start developer tools as well:
+
+```bash
+docker compose --profile fullstack --profile devtools up --build
+```
+
+## Session Persistence
+
+GramSetu now mirrors active chat sessions into the cache layer so a restart no longer depends only on in-memory dictionaries. Redis is used when available, and the in-memory cache remains as a free fallback for local development.
+
 ## Deploy and Run
 
 Backend only:
