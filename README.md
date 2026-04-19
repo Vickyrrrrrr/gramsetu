@@ -43,6 +43,24 @@ The goal is simple: the LLM may suggest values, but deterministic code decides w
 
 ## Production Structure (v2)
 
+
+## Production package layout
+
+The backend now exposes a cleaner package layout without breaking existing behavior:
+
+```text
+backend/
+  api/            # request-layer helpers and future route modules
+  core/           # settings and shared runtime utilities
+  integrations/   # browser, LLM, security, schemes, TTS wrappers
+  orchestrator/   # LangGraph flow + typed models
+  storage/        # database access facade
+  mcp_servers/    # DigiLocker, browser, audit, WhatsApp connectors
+```
+
+The original modules remain in place for compatibility, but the application entrypoint now imports through the new package structure so future refactors can move implementation behind stable interfaces.
+
+
 GramSetu is now organized around the real production flow instead of demo-only helpers:
 
 - `whatsapp_bot/main.py` — FastAPI entrypoint for API, OTP, TTS, health and DigiLocker callback.
