@@ -40,6 +40,42 @@ GramSetu v2 adds explicit protection for common failure modes in AI-assisted for
 
 The goal is simple: the LLM may suggest values, but deterministic code decides whether submission is safe.
 
+
+## Production Structure (v2)
+
+GramSetu is now organized around the real production flow instead of demo-only helpers:
+
+- `whatsapp_bot/main.py` — FastAPI entrypoint for API, OTP, TTS, health and DigiLocker callback.
+- `backend/agents/` — LangGraph workflow, schema validation, and state handling.
+- `backend/reliability.py` — deterministic safety checks before live automation.
+- `backend/mcp_servers/` — DigiLocker, browser, audit, and WhatsApp integration services.
+- `webapp/` — citizen-facing Next.js application.
+- `data/` — persistent SQLite checkpoints, audit logs, screenshots, and runtime artifacts.
+
+Removed from the production path:
+
+- `index.html` is treated as an old presentation artifact, not part of the deployed backend.
+- `start_demo.ps1` is treated as legacy demo tooling, not part of the container deployment path.
+- `backend/llm_client.py.bak` is treated as a stale backup file and excluded from Docker builds.
+
+## Deploy Anywhere (Docker)
+
+Backend only:
+
+```bash
+cp .env.example .env
+docker compose up --build gramsetu-backend
+```
+
+Full stack:
+
+```bash
+cp .env.example .env
+docker compose --profile fullstack up --build
+```
+
+The backend exposes port `8000`, persists runtime state in the `gramsetu_data` volume, and includes a healthcheck against `/api/health` for container orchestration.
+
 ## Quick Start
 
 ### Prerequisites

@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  gramsetu-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gramsetu-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      HEADLESS_BROWSER: "true"
+    ports:
+      - "8000:8000"
+    volumes:
+      - gramsetu_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  gramsetu-webapp:
+    build:
+      context: ./webapp
+      dockerfile: Dockerfile
+    container_name: gramsetu-webapp
+    restart: unless-stopped
+    depends_on:
+      gramsetu-backend:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: http://gramsetu-backend:8000
+    ports:
+      - "3000:3000"
+    profiles: ["fullstack"]
+
+volumes:
+  gramsetu_data:
