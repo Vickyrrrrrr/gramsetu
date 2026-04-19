@@ -36,8 +36,6 @@ from backend.api.routes.services import router as services_router
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-load_dotenv()
-
 from whatsapp_bot.voice_handler import transcribe_audio
 from whatsapp_bot.language_utils import detect_language
 from backend.storage import db
