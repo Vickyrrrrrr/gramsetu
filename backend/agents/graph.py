@@ -23,12 +23,10 @@ Checkpoint: SQLite-backed for persistent suspend/resume.
 """
 
 import os
-import json
 import time
 import uuid
 import asyncio
 from typing import Any, Optional
-from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
@@ -38,9 +36,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from backend.agents.schema import (
     GramSetuState,
     GraphStatus,
-    SCHEMA_REGISTRY,
     get_required_fields,
-    validate_partial_form,
 )
 from backend.reliability import (
     build_safe_submission_decision,
@@ -189,7 +185,6 @@ async def _call_nim(messages: list[dict], temperature: float = 0.1, max_tokens: 
 def _fallback_response(messages: list) -> str:
     """Keyword-based fallback — the only intent path now."""
     last_msg = messages[-1].get("content", "") if messages else ""
-    lower = last_msg.lower()
     intent, conf = _detect_intent_keywords(last_msg)
     if intent != "unknown":
         return f'{{"intent": "{intent}", "confidence": {conf}}}'
@@ -628,7 +623,6 @@ async def digilocker_fetch_node(state: GramSetuState) -> GramSetuState:
 
     extracted = dl_result.get("extracted_data", {})
     confidence = dl_result.get("confidence_scores", {})
-    sources = dl_result.get("sources", {})
     missing = dl_result.get("missing_fields", [])
 
     state["form_data"] = extracted
@@ -819,7 +813,6 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
 
     # ── Resuming after OTP ───────────────────────────────────
     if state.get("otp_value"):
-        otp = state["otp_value"]
         form_type = state.get("form_type", "")
         form_data = state.get("form_data", {})
 
@@ -1106,7 +1099,7 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
             _text_content = "\n".join(_lines)
             # Create a simple PNG via PIL if available, else use a data URI SVG
             try:
-                from PIL import Image, ImageDraw, ImageFont
+                from PIL import Image, ImageDraw
                 img = Image.new("RGB", (600, 400), color=(255, 255, 255))
                 draw = ImageDraw.Draw(img)
                 y = 20
