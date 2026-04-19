@@ -1,10 +1,12 @@
-from backend.storage import db
-from backend.api.app import _user_sessions, _impact
-from fastapi.responses import JSONResponse
-from fastapi import APIRouter, Request
+import os
 
+from fastapi import APIRouter, Request, HTTPException, WebSocket
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+
+from backend.storage import db
 from backend.core.cache import get_cache
-from backend.api.state import settings, _impact
+from backend.api.state import settings
+from backend.api.app import _user_sessions, _impact, _completed_forms, STATIC_DIR
 
 router = APIRouter(tags=["health"])
 
