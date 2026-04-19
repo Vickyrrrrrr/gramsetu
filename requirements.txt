@@ -46,7 +46,7 @@ python-jose[cryptographic]>=3.3.0     # JWT for API auth
 
 # ── Database (Async SQLite for Audit Logs) ───────────────────
 aiosqlite>=0.21.0                     # Non-blocking DB operations
-
+supabase>=2.0.0
 # ── Logging & Observability ──────────────────────────────────
 structlog>=24.4.0                     # Structured logging (PII-redacted)
 rich>=13.9.0                          # Rich terminal output
