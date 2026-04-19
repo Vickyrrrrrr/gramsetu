@@ -250,3 +250,23 @@ async def stagehand_detect_otp(page) -> dict:
         }
     except Exception as e:
         return {"is_otp_page": False, "confidence": 0.0, "error": str(e)}
+
+
+# ── Safe planning mode before live automation ────────────────
+def build_fill_plan(form_data: dict) -> list[dict]:
+    """Create deterministic browser steps before touching a real form."""
+    plan = []
+    for field, value in (form_data or {}).items():
+        if value in (None, "", []):
+            continue
+        label = _FIELD_LABELS.get(field, field.replace("_", " ").title())
+        plan.append({"field": field, "label": label, "value": str(value), "action": "fill"})
+    return plan
+
+
+async def safe_stagehand_fill_form(page, form_data: dict, dry_run: bool = True):
+    """Dry run first; only execute if caller explicitly disables dry_run."""
+    plan = build_fill_plan(form_data)
+    if dry_run:
+        return {"ok": True, "mode": "dry_run", "plan": plan}
+    return await stagehand_fill_form(page, form_data)

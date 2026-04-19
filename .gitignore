@@ -29,3 +29,7 @@ data/*.db
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Docker / local ops
+.env.local
+docker-compose.override.yml

@@ -13,6 +13,172 @@ GramSetu replies in under 2 seconds, fetches all required data from DigiLocker a
 
 ---
 
+## Reliability Layer (v2)
+
+GramSetu v2 adds a deterministic safety layer before any live form submission:
+
+- **Normalization first**: values are cleaned into canonical formats before validation.
+- **Rule-based validation**: Aadhaar, PAN, mobile, PIN code, DOB and more are validated in pure Python.
+- **Cross-field checks**: contradictory values (for example, invalid mobile prefixes or identical applicant/guardian names) are blocked before automation.
+- **Final submission gate**: browser automation only starts if required fields are present and the form passes deterministic checks.
+- **Human review guard**: low-confidence extraction, OTP steps, or edits to sensitive PII require explicit review.
+- **Dry-run browser plan**: the agent can generate a fill plan before touching the real government portal.
+
+This architecture reduces hallucinations by making the LLM responsible for extraction and language understanding, while deterministic code owns correctness and submission safety.
+
+
+## Edge Cases Covered in v2
+
+GramSetu v2 adds explicit protection for common failure modes in AI-assisted form filling:
+
+- malformed Aadhaar, PAN, phone, PIN code, email and DOB values
+- contradictory values across fields
+- duplicate values copied into multiple fields
+- low-confidence field extraction
+- missing required values before submission
+- risky automation without human review
+
+The goal is simple: the LLM may suggest values, but deterministic code decides whether submission is safe.
+
+
+## Production Structure (v2)
+
+
+## Production package layout
+
+The backend now exposes a cleaner package layout without breaking existing behavior:
+
+```text
+backend/
+  api/            # request-layer helpers and future route modules
+  core/           # settings and shared runtime utilities
+  integrations/   # browser, LLM, security, schemes, TTS wrappers
+  orchestrator/   # LangGraph flow + typed models
+  storage/        # database access facade
+  mcp_servers/    # DigiLocker, browser, audit, WhatsApp connectors
+```
+
+The original modules remain in place for compatibility, but the application entrypoint now imports through the new package structure so future refactors can move implementation behind stable interfaces.
+
+
+GramSetu is now organized around the real production flow instead of demo-only helpers:
+
+- `whatsapp_bot/main.py` — FastAPI entrypoint for API, OTP, TTS, health and DigiLocker callback.
+- `backend/agents/` — LangGraph workflow, schema validation, and state handling.
+- `backend/reliability.py` — deterministic safety checks before live automation.
+- `backend/mcp_servers/` — DigiLocker, browser, audit, and WhatsApp integration services.
+- `webapp/` — citizen-facing Next.js application.
+- `data/` — persistent SQLite checkpoints, audit logs, screenshots, and runtime artifacts.
+
+Removed from the production path:
+
+- `index.html` is treated as an old presentation artifact, not part of the deployed backend.
+- `start_demo.ps1` is treated as legacy demo tooling, not part of the container deployment path.
+- `backend/llm_client.py.bak` is treated as a stale backup file and excluded from Docker builds.
+
+## Deploy Anywhere (Docker)
+
+Backend only:
+
+```bash
+cp .env.example .env
+docker compose up --build gramsetu-backend
+```
+
+Full stack:
+
+```bash
+cp .env.example .env
+docker compose --profile fullstack up --build
+```
+
+The backend exposes port `8000`, persists runtime state in the `gramsetu_data` volume, and includes a healthcheck against `/api/health` for container orchestration.
+
+
+## How GramSetu Works
+
+GramSetu follows a real production flow built for low-friction public-service access:
+
+1. **User starts in web app or WhatsApp** — a citizen asks for a service in natural language or voice.
+2. **Intent + language detection** — the backend identifies the required form, scheme, or service.
+3. **Data collection and prefilling** — the system gathers available user details and prepares structured form data.
+4. **Deterministic safety checks** — normalization, field validation, cross-field consistency checks, and low-confidence detection run before live automation.
+5. **Human review gate** — risky or incomplete cases are paused for review instead of silently submitting bad data.
+6. **Dry-run fill plan** — GramSetu generates a planned field-by-field browser action sequence.
+7. **Live portal automation** — only validated submissions continue to browser automation and OTP handling.
+8. **Receipt and state tracking** — application progress, reference numbers, and session state are persisted for recovery.
+9. **Observability** — metrics flow to Prometheus and dashboards appear in Grafana for backend visibility.
+
+This keeps the LLM responsible for understanding and extraction, while deterministic code owns correctness, reliability, and submission safety.
+
+
+
+## Entrypoint refactor
+
+The runtime entrypoint is now intentionally thin:
+
+- `backend/api/app.py` contains the assembled FastAPI application.
+- `whatsapp_bot/main.py` is now only a stable launcher for Docker and local CLI usage.
+
+This makes it easier to keep the deployment command stable while continuing to split routes and orchestration logic into smaller backend modules.
+
+## Workflow Startup
+
+The default Docker workflow now starts the full backend runtime needed for GramSetu's real flow:
+
+- `gramsetu-backend` for API, orchestration, OTP flow, and browser automation.
+- `gramsetu-redis` for cache, chat-session persistence, and short-lived workflow state.
+- `gramsetu-prometheus` for metrics scraping.
+- `gramsetu-grafana` for dashboards.
+
+Start the core workflow:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+Start the core workflow plus the web app:
+
+```bash
+docker compose --profile fullstack up --build
+```
+
+Start developer tools as well:
+
+```bash
+docker compose --profile fullstack --profile devtools up --build
+```
+
+## Session Persistence
+
+GramSetu now mirrors active chat sessions into the cache layer so a restart no longer depends only on in-memory dictionaries. Redis is used when available, and the in-memory cache remains as a free fallback for local development.
+
+## Deploy and Run
+
+Backend only:
+
+```bash
+cp .env.example .env
+docker compose up --build gramsetu-backend gramsetu-redis
+```
+
+Full stack with monitoring:
+
+```bash
+cp .env.example .env
+docker compose --profile fullstack --profile observability up --build
+```
+
+Useful endpoints after startup:
+
+- API health: `http://localhost:8000/api/health`
+- Liveness: `http://localhost:8000/live`
+- Readiness: `http://localhost:8000/ready`
+- Metrics: `http://localhost:8000/metrics`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001`
+
 ## Quick Start
 
 ### Prerequisites
@@ -326,3 +492,62 @@ python -m pytest tests/ -v
 | [API_GUIDE.md](API_GUIDE.md) | Full API usage with curl examples |
 | [WHATSAPP_SETUP.md](WHATSAPP_SETUP.md) | Twilio sandbox + ngrok setup |
 | [SERVER_GUIDE.md](SERVER_GUIDE.md) | All server processes, ports, troubleshooting |
+
+
+## Free-now infrastructure
+
+GramSetu v2 is now set up for a **free-first deployment path**:
+
+- Backend runs in a single Python container.
+- Redis is included for future-safe caching and session coordination.
+- Prometheus and Grafana are wired through Docker Compose for observability.
+- The backend still falls back safely if Redis is unavailable, which helps on low-cost or local setups.
+
+Useful commands:
+
+```bash
+# Backend + Redis only
+docker compose up --build gramsetu-backend gramsetu-redis
+
+# Add web app
+docker compose --profile fullstack up --build
+
+# Add monitoring stack
+docker compose --profile observability up --build
+```
+
+
+## Ongoing API split
+
+The API split is being done safely in phases. `backend/api/routes/health.py` is now extracted first while the remaining routes stay in `backend/api/app.py` until they are moved one by one.
+
+The phased API split continues: `backend/api/routes/voice.py` has now been extracted for voice input and TTS endpoints.
+
+
+## Backend modularization progress
+
+The API layer is now split into focused route modules:
+
+- `backend/api/routes/health.py`
+- `backend/api/routes/voice.py`
+- `backend/api/routes/chat.py`
+- `backend/api/routes/services.py`
+
+`backend/api/app.py` now acts mainly as the application assembly layer.
+
+
+## CI/CD
+
+This branch now includes GitHub Actions workflows under `.github/workflows/`:
+
+- `ci.yml` runs backend install checks, Python compile validation, optional pytest execution, and Docker Compose validation.
+- `docker-publish.yml` builds and pushes the backend image to GHCR.
+- `deploy.yml` deploys the `v2` branch to a remote server over SSH after a successful image publish or via manual dispatch.
+
+### Required GitHub secrets
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PORT` (optional)
+- `DEPLOY_APP_DIR` (optional)

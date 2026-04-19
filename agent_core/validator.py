@@ -210,3 +210,76 @@ def validate_field(field_name: str, value: str) -> dict:
     if value and str(value).strip():
         return {"valid": True, "error": None, "confidence_boost": 0.0}
     return {"valid": False, "error": f"{field_name} cannot be empty", "confidence_boost": -0.1}
+
+
+from datetime import datetime
+
+
+def normalize_field_value(field_name: str, value):
+    """Normalize user/LLM extracted values before validation."""
+    if value is None:
+        return value
+    if isinstance(value, str):
+        value = value.strip()
+        value = re.sub(r"\s+", " ", value)
+    if field_name in {"aadhaar_number", "mobile", "phone", "pincode"} and value is not None:
+        return re.sub(r"[^0-9]", "", str(value))
+    if field_name in {"pan_number", "pan"} and value is not None:
+        return str(value).strip().upper().replace(" ", "")
+    if field_name in {"email"} and value is not None:
+        return str(value).strip().lower()
+    return value
+
+
+def validate_cross_field_consistency(form_type: str, data: dict) -> dict:
+    """Deterministic checks across fields so AI cannot submit contradictory data."""
+    errors = []
+    name = str(data.get("applicant_name") or data.get("full_name") or "").strip()
+    guardian = str(data.get("father_name") or data.get("guardian_name") or "").strip()
+    mobile = str(data.get("mobile") or data.get("phone") or "").strip()
+    pincode = str(data.get("pincode") or "").strip()
+    dob = str(data.get("date_of_birth") or data.get("dob") or "").strip()
+
+    if name and guardian and name.lower() == guardian.lower():
+        errors.append("Applicant name and father/guardian name cannot be identical")
+    if mobile and len(mobile) == 10 and mobile[0] not in '6789':
+        errors.append("Indian mobile number must start with 6, 7, 8, or 9")
+    if pincode and len(pincode) == 6 and pincode[0] == '0':
+        errors.append("PIN code cannot start with 0")
+    if dob:
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                parsed = datetime.strptime(dob, fmt)
+                if parsed.year < 1900 or parsed > datetime.now():
+                    errors.append("Date of birth is out of allowed range")
+                break
+            except Exception:
+                continue
+    return {"valid": len(errors) == 0, "errors": errors}
+
+
+def final_submission_gate(form_type: str, data: dict, required_fields: list | None = None) -> dict:
+    """Hard stop before browser automation starts."""
+    normalized = {}
+    for k, v in (data or {}).items():
+        normalized[k] = normalize_field_value(k, v)
+
+    field_errors = {}
+    for key, value in normalized.items():
+        result = validate_field(key, value)
+        if isinstance(result, dict) and not result.get("valid", True):
+            field_errors[key] = result.get("error", "Invalid value")
+
+    missing = []
+    for field in (required_fields or []):
+        if normalized.get(field) in (None, "", []):
+            missing.append(field)
+
+    consistency = validate_cross_field_consistency(form_type, normalized)
+    return {
+        "valid": not field_errors and not missing and consistency.get("valid", False),
+        "normalized": normalized,
+        "missing": missing,
+        "field_errors": field_errors,
+        "consistency_errors": consistency.get("errors", []),
+    }

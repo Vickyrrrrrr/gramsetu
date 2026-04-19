@@ -55,3 +55,7 @@ rich>=13.9.0                          # Rich terminal output
 python-dotenv>=1.0.1                  # Environment variable management
 requests>=2.32.0                      # Sync HTTP fallback
 aiofiles>=24.1.0                      # Async file operations
+
+# ── Caching & Metrics ───────────────────────────────────────
+redis[hiredis]>=5.2.1
+prometheus-client>=0.21.0
