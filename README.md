@@ -534,3 +534,20 @@ The API layer is now split into focused route modules:
 - `backend/api/routes/services.py`
 
 `backend/api/app.py` now acts mainly as the application assembly layer.
+
+
+## CI/CD
+
+This branch now includes GitHub Actions workflows under `.github/workflows/`:
+
+- `ci.yml` runs backend install checks, Python compile validation, optional pytest execution, and Docker Compose validation.
+- `docker-publish.yml` builds and pushes the backend image to GHCR.
+- `deploy.yml` deploys the `v2` branch to a remote server over SSH after a successful image publish or via manual dispatch.
+
+### Required GitHub secrets
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PORT` (optional)
+- `DEPLOY_APP_DIR` (optional)
