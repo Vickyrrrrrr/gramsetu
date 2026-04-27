@@ -190,6 +190,8 @@ def _start_mcp_servers():
 # ---------------------------------------------------------------------------
 # Core: run a message through the v3 LangGraph pipeline
 # ---------------------------------------------------------------------------
+from lib.language_utils import detect_language
+
 async def _process(
     user_id: str, phone: str, message: str,
     message_type: str = "text", form_type: str = "",

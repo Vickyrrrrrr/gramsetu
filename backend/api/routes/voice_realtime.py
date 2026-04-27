@@ -115,12 +115,12 @@ async def websocket_realtime_stt(websocket: WebSocket):
         print(f"[Realtime STT] Error: {e}")
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
-        except:
+        except Exception:
             pass
     finally:
         if sarvam_ws and not sarvam_ws.closed:
             await sarvam_ws.close()
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass

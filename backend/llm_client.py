@@ -133,27 +133,33 @@ async def _nim_call(model: str, messages: list, temperature: float, max_tokens: 
 async def chat_intent(messages: list, temperature: float = 0.1, max_tokens: int = 256) -> str:
     """Fast intent classification -- Sarvam/Groq llama-3.1-8b-instant."""
     result = await _sarvam_call(messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     result = await _groq_call(GROQ_MODEL_FAST, messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
 async def chat_conversational(messages: list, temperature: float = 0.6, max_tokens: int = 768) -> str:
     """Warm multilingual conversation -- Sarvam primary."""
     result = await _sarvam_call(messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     result = await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
 async def chat_extraction(messages: list, temperature: float = 0.1, max_tokens: int = 512) -> str:
     """Structured extraction -- Sarvam/Groq 70B."""
     result = await _sarvam_call(messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     result = await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
@@ -219,9 +225,11 @@ async def chat(
 ) -> str:
     """General-purpose chat -- Sarvam primary, then Groq/NVIDIA."""
     result = await _sarvam_call(messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     result = await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
-    if result: return result
+    if result:
+        return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
@@ -248,11 +256,14 @@ async def detect_intent(text: str) -> str:
         {"role": "user", "content": text},
     ]
     result = await _sarvam_call(messages, 0.0, 32)
-    if result: return result.strip().lower()
+    if result:
+        return result.strip().lower()
     result = await _groq_call(GROQ_MODEL_FAST, messages, 0.0, 32)
-    if result: return result.strip().lower()
+    if result:
+        return result.strip().lower()
     result = await _nim_call(NIM_MODEL_GENERAL, messages, 0.0, 32)
-    if result: return result.strip().lower()
+    if result:
+        return result.strip().lower()
     return _intent_keyword_fallback(text)
 
 

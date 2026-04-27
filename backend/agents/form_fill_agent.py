@@ -50,6 +50,7 @@ from backend.agents.portal_registry import (
     PORTAL_URLS,
 )
 from backend.agents.schema import GramSetuState, GraphStatus
+from backend.agents.graph import _browser_ws_clients
 
 # ── Config ────────────────────────────────────────────────
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
@@ -63,7 +64,6 @@ SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
 _SARVAM_OK = bool(SARVAM_API_KEY and SARVAM_API_KEY not in ("", "your_sarvam_key_here"))
 
 # ── WebSocket Clients (shared with graph.py) ─────────────────
-from backend.agents.graph import _browser_ws_clients
 
 # ── Cancellation Signals ─────────────────────────────────────
 # session_id -> bool (if true, agent should abort)
@@ -340,8 +340,7 @@ def _parse_action_response(raw: str) -> FormFillAction:
                 reasoning=parsed.get("reasoning", ""),
             )
     except Exception as e:
-        pass
-    return FormFillAction(action="wait_for_page", error=f"parse_error: {e}")
+        return FormFillAction(action="wait_for_page", error=f"parse_error: {e}")
 
 
 async def analyze_portal_screenshot(
@@ -624,13 +623,11 @@ async def _playwright_fill(
                         ]
                         if action.label:
                             button_labels.insert(0, action.label)
-                        clicked = False
                         for bl in button_labels:
                             try:
                                 btn = page.get_by_role("button", name=bl).first
                                 if await btn.count() > 0:
                                     await btn.click(timeout=1000)
-                                    clicked = True
                                     await page.wait_for_timeout(1500)
                                     break
                             except Exception:

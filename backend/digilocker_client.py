@@ -18,12 +18,6 @@ def _get_demo_data(form_type: str) -> dict:
         "state": "उत्तर प्रदेश",
         "pincode": "226001",
     }
-    pan = {
-        "pan_number": "ABCDE1234F",
-        "name": "Ram Kumar Sharma",
-        "father_name": "Suresh Kumar Sharma",
-        "date_of_birth": "1985-03-15",
-    }
     bank = {
         "account_holder_name": "Ram Kumar Sharma",
         "account_number": "31850100073456",
