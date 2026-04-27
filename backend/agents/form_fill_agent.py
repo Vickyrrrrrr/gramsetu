@@ -40,9 +40,6 @@ from typing import Optional, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from dotenv import load_dotenv
-load_dotenv()
-
 from backend.agents.portal_registry import (
     get_portal_info,
     get_field_labels,
@@ -51,6 +48,9 @@ from backend.agents.portal_registry import (
 )
 from backend.agents.schema import GramSetuState, GraphStatus
 from backend.agents.graph import _browser_ws_clients
+
+from dotenv import load_dotenv
+load_dotenv()
 
 # ── Config ────────────────────────────────────────────────
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
