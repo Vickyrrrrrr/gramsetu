@@ -29,3 +29,15 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./deploy/nginx
+      dockerfile: Dockerfile
+    container_name: gramsetu-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    restart: unless-stopped
