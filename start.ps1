@@ -6,7 +6,7 @@
 #   .\start.ps1 -Ngrok     # + ngrok tunnel for Twilio
 #   .\start.ps1 -Dashboard # + Streamlit dashboard
 #   .\start.ps1 -Webapp    # + Next.js web app
-#   .\start.ps1 -All       # Everything
+#  C      # Everything
 #   .\start.ps1 -Prod      # Disable hot-reload (stable for demos)
 #
 # NOTE: MCP servers (WhatsApp / Browser / Audit / DigiLocker) are now

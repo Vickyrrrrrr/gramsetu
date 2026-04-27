@@ -1,57 +1,24 @@
-# ============================================================
-# GramSetu v3 — Production Dependencies
-# AI Government Forms Assistant (Web + Voice)
-# ============================================================
-
-# ── Orchestration (LangGraph Multi-Agent State Machine) ──────
+# ── AI / LLM ──────────────────────────────────────────────
 langgraph>=0.3.0
 langchain-core>=0.3.0
-langchain-nvidia-ai-endpoints>=0.3.0
-langgraph-checkpoint-sqlite>=2.0.0    # Persistent graph checkpoints (required separately)
+langgraph-checkpoint-sqlite>=2.0.0
 
-# ── MCP Protocol (FastMCP — Tool Discovery via SSE/HTTP) ─────
-fastmcp>=2.0.0                        # Model Context Protocol SDK
-
-# ── Validation (Pydantic-AI — Strict Schema Enforcement) ─────
-pydantic-ai>=0.1.0
-pydantic>=2.10.0
-pydantic-settings>=2.7.0
-
-# ── Inference (NVIDIA NIM — Llama 3.1 70B Instruct) ─────────
-openai>=1.60.0                        # NIM uses OpenAI-compatible API
-httpx>=0.28.0                         # Async HTTP for NIM streaming
-edge-tts>=7.0.0                       # Free TTS via Microsoft Edge voices
-
-# ── Browser Automation (Playwright + VLM Navigation) ────────
-playwright>=1.49.0                    # Govt portal form-filling
-Pillow>=11.0.0                        # Screenshot processing for VLM
-
-# ── Web Framework (FastAPI + Uvicorn) ────────────────────────
+# ── Web Framework ───────────────────────────────────────────
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
-python-multipart>=0.0.20              # Form data / file uploads
+python-multipart>=0.0.20
 
-# ── ASR & Speech (NVIDIA NeMo via NIM) ──────────────────────
-soundfile>=0.13.0                     # Audio file I/O
-numpy>=2.2.0                          # Numeric processing
-librosa>=0.10.0                       # Audio feature extraction
+# ── LLM Clients ─────────────────────────────────────────────
+openai>=1.60.0
+httpx>=0.28.0
 
-# ── Dashboard (Streamlit — Live Browser + Audit View) ────────
-streamlit>=1.41.0
-streamlit-autorefresh>=1.0.1          # Real-time dashboard refresh
+# ── Browser Automation (form filling) ──────────────────────
+playwright>=1.49.0
+Pillow>=11.0.0
 
-# ── Security & PII Protection ────────────────────────────────
-cryptography>=44.0.0                  # AES encryption for PII in transit
-python-jose[cryptographic]>=3.3.0     # JWT for API auth
+# ── Security ───────────────────────────────────────────────
+cryptography>=44.0.0
 
-# ── Database (Async SQLite for Audit Logs) ───────────────────
-aiosqlite>=0.21.0                     # Non-blocking DB operations
-
-# ── Logging & Observability ──────────────────────────────────
-structlog>=24.4.0                     # Structured logging (PII-redacted)
-rich>=13.9.0                          # Rich terminal output
-
-# ── Utilities ────────────────────────────────────────────────
-python-dotenv>=1.0.1                  # Environment variable management
-requests>=2.32.0                      # Sync HTTP fallback
-aiofiles>=24.1.0                      # Async file operations
+# ── Environment ───────────────────────────────────────────
+python-dotenv>=1.0.1
+aiosqlite>=0.21.0

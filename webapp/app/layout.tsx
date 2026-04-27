@@ -20,14 +20,14 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        {/* Geist font via Vercel CDN */}
         <link
           rel="stylesheet"
           href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap"
         />
-        <style>{`
-          @import url('https://fonts.cdnfonts.com/css/geist');
-        `}</style>
+        <link
+          rel="stylesheet"
+          href="https://fonts.cdnfonts.com/css/geist"
+        />
       </head>
       <body className="bg-cream text-ink antialiased">{children}</body>
     </html>
