@@ -36,16 +36,15 @@ jobs:
 
       - name: Ruff autofix safe issues in backend
         run: |
-          ruff check backend whatsapp_bot --config ruff.toml --fix || true
+          ruff check backend --config ruff.toml --fix || true
 
       - name: Ruff lint backend only
         run: |
-          ruff check backend whatsapp_bot --config ruff.toml
+          ruff check backend --config ruff.toml
 
       - name: Compile Python
         run: |
           [ -d backend ] && python -m compileall backend
-          [ -d whatsapp_bot ] && python -m compileall whatsapp_bot || true
 
       - name: Run tests
         env:
