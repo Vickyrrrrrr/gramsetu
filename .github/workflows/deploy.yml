@@ -1,0 +1,25 @@
+name: Deploy Production
+
+on:
+  workflow_run:
+    workflows: ["Docker Publish"]
+    types: [completed]
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Deployment mode notice
+        run: |
+          echo "GitHub deploy over SSH disabled."
+          echo "This repository is deployed on Railway, so SSH-based server deployment is not required."
+          echo "Use Railway's GitHub integration or add a Railway-specific deploy action later if needed."

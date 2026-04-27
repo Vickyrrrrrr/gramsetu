@@ -351,3 +351,30 @@ class TestAppRuntime:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+
+class TestFinalSubmissionGate:
+    def test_blocks_invalid_mobile(self):
+        from agent_core.validator import final_submission_gate
+        result = final_submission_gate("ration_card", {"mobile": "1234567890"}, ["mobile"])
+        assert result["valid"] is False
+        assert "mobile" in result["field_errors"] or result["consistency_errors"]
+
+    def test_blocks_missing_required(self):
+        from agent_core.validator import final_submission_gate
+        result = final_submission_gate("ration_card", {"full_name": "Vicky"}, ["full_name", "pincode"])
+        assert result["valid"] is False
+        assert "pincode" in result["missing"]
+
+    def test_normalizes_pan(self):
+        from agent_core.validator import normalize_field_value
+        assert normalize_field_value("pan_number", " abcpk1234q ") == "ABCPK1234Q"
+
+
+class TestHumanReviewGuard:
+    def test_low_confidence_forces_review(self):
+        from backend.security import require_human_review
+        result = require_human_review(confidence=0.80)
+        assert result["allowed"] is False
+        assert "confidence_below_threshold" in result["reasons"]

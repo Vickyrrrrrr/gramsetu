@@ -1,0 +1,18 @@
+[lint]
+exclude = [
+  ".git",
+  ".github",
+  "frontend",
+  "node_modules",
+  "dist",
+  "build",
+  ".venv",
+  "venv"
+]
+dummy-variable-rgx = "^(_|unused_|ignored_|pan_num$)"
+
+[lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+"backend/api/app.py" = ["F401", "E402"]
+"backend/agents/schema.py" = ["F841"]
+"backend/agents/graph.py" = ["F841"]
