@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Send, Loader2, ChevronRight, X, Mic, MicOff,
   Activity, RefreshCw, Globe, Image as ImageIcon, Wifi, WifiOff,
-  Minimize2, Maximize2, Monitor, Volume2, Lock, ShieldCheck, Database, ExternalLink,
+  Minimize2, Maximize2, Monitor, Volume2, Lock, ShieldCheck, Database, ExternalLink, Github,
 } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════
