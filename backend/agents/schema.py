@@ -34,6 +34,7 @@ class GraphStatus(str, Enum):
     WAIT_OTP = "wait_otp"
     WAIT_CONFIRM = "wait_confirm"
     WAIT_USER = "wait_user"
+    WAIT_PHOTO = "wait_photo"
     COMPLETED = "completed"
     ERROR = "error"
 

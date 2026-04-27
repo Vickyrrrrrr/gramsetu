@@ -126,7 +126,7 @@ export default function LandingPage() {
             {
               icon: <Mic size={22} />, step: '01',
               title: 'You speak',
-              body: 'Send a voice note on WhatsApp — "मुझे राशन कार्ड चाहिए" or type in any language. GramSetu detects it automatically.',
+              body: 'Click the mic or type in any language — "मुझे राशन कार्ड चाहिए" or "I need a ration card". GramSetu detects it automatically.',
             },
             {
               icon: <FileText size={22} />, step: '02',
@@ -250,8 +250,8 @@ export default function LandingPage() {
           <span className="serif text-base" style={{ color: '#0C0C0C' }}>GramSetu</span>
           <span>Built for Bharat. Built with ❤️</span>
           <div className="flex gap-4">
-            <a href="#" className="hover:text-[#0C0C0C] transition-colors">GitHub</a>
-            <a href="#" className="hover:text-[#0C0C0C] transition-colors">WhatsApp</a>
+            <a href="https://github.com/Vickyrrrrrr/gramsetu" target="_blank" rel="noopener noreferrer" className="hover:text-[#0C0C0C] transition-colors">GitHub</a>
+            <a href="#" className="hover:text-[#0C0C0C] transition-colors">Docs</a>
             <Link href="/admin" className="hover:text-[#0C0C0C] transition-colors">Admin</Link>
           </div>
         </div>

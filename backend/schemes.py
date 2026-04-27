@@ -8,7 +8,7 @@ to discover government schemes in REAL TIME.
 When a user says "I'm a farmer, 65 years old":
 1. The LLM searches government websites (india.gov.in, myscheme.gov.in)
 2. It finds ALL matching schemes with eligibility criteria
-3. Returns a WhatsApp-formatted list with benefits
+3. Returns a formatted list with benefits
 
 Falls back to a curated local database if LLM is unavailable.
 """
@@ -142,7 +142,7 @@ async def _llm_discover(
 
     schemes = data["schemes"]
 
-    # Build WhatsApp message
+    # Build formatted message
     if language == "hi":
         message = _build_message_hi(schemes)
     else:
@@ -216,10 +216,10 @@ async def check_application_status(
     Can also scrape the status page if application_id is provided.
     """
     portal_map = {
-        "ration_card": "https://nfsa.gov.in/",
-        "pension": "https://nsap.nic.in/",
-        "pm_kisan": "https://pmkisan.gov.in/",
-        "pan_card": "https://www.onlineservices.nsdl.com/paam/",
+        "ration_card": "http://127.0.0.1:8000/mock/ration_card.html",
+        "pension": "http://127.0.0.1:8000/mock/pension.html",
+        "pm_kisan": "http://127.0.0.1:8000/mock/ration_card.html",
+        "pan_card": "http://127.0.0.1:8000/mock/pan_card.html",
     }
 
     portal = portal_map.get(form_type, "https://services.india.gov.in/")
@@ -293,21 +293,21 @@ FALLBACK_SCHEMES = [
         "benefit": "₹1-3/kg food grains", "emoji": "🍚",
         "description": "Subsidized wheat, rice, dal",
         "eligibility": {"min_age": 18, "max_income": 10_000_000, "gender": "any", "occupation": "any"},
-        "portal": "https://nfsa.gov.in/", "id": "ration_card",
+        "portal": "http://127.0.0.1:8000/mock/ration_card.html", "id": "ration_card",
     },
     {
         "name": "Old Age Pension (IGNOAPS)", "name_hi": "वृद्धावस्था पेंशन",
         "benefit": "₹200-500/month", "emoji": "👴",
         "description": "For senior citizens 60+ years (BPL)",
         "eligibility": {"min_age": 60, "max_income": 200_000, "gender": "any", "occupation": "any"},
-        "portal": "https://nsap.nic.in/", "id": "pension_old_age",
+        "portal": "http://127.0.0.1:8000/mock/pension.html", "id": "pension_old_age",
     },
     {
         "name": "PM-KISAN", "name_hi": "पीएम-किसान",
         "benefit": "₹6,000/year", "emoji": "🌾",
         "description": "Income support for farmers",
         "eligibility": {"min_age": 18, "max_income": 10_000_000, "gender": "any", "occupation": "farmer"},
-        "portal": "https://pmkisan.gov.in/", "id": "pm_kisan",
+        "portal": "http://127.0.0.1:8000/mock/ration_card.html", "id": "pm_kisan",
     },
     {
         "name": "PM Fasal Bima", "name_hi": "फसल बीमा",
@@ -321,14 +321,14 @@ FALLBACK_SCHEMES = [
         "benefit": "Tax filing + KYC", "emoji": "📇",
         "description": "Essential identity document",
         "eligibility": {"min_age": 18, "max_income": 10_000_000, "gender": "any", "occupation": "any"},
-        "portal": "https://www.onlineservices.nsdl.com/paam/", "id": "pan_card",
+        "portal": "http://127.0.0.1:8000/mock/pan_card.html", "id": "pan_card",
     },
     {
         "name": "Voter ID", "name_hi": "मतदाता पहचान पत्र",
         "benefit": "Voting rights + ID proof", "emoji": "🗳️",
         "description": "Right to vote document",
         "eligibility": {"min_age": 18, "max_income": 10_000_000, "gender": "any", "occupation": "any"},
-        "portal": "https://voters.eci.gov.in/", "id": "voter_id",
+        "portal": "http://127.0.0.1:8000/mock/pan_card.html", "id": "voter_id",
     },
     {
         "name": "PM Ujjwala Yojana", "name_hi": "उज्ज्वला योजना",
@@ -356,14 +356,14 @@ FALLBACK_SCHEMES = [
         "benefit": "₹300-500/month", "emoji": "🙏",
         "description": "For widowed women (40+)",
         "eligibility": {"min_age": 40, "max_income": 200_000, "gender": "female", "occupation": "any"},
-        "portal": "https://nsap.nic.in/", "id": "pension_widow",
+        "portal": "http://127.0.0.1:8000/mock/pension.html", "id": "pension_widow",
     },
     {
         "name": "Disability Pension (IGNDPS)", "name_hi": "विकलांग पेंशन",
         "benefit": "₹300-500/month", "emoji": "♿",
         "description": "For persons with 40%+ disability",
         "eligibility": {"min_age": 18, "max_income": 200_000, "gender": "any", "occupation": "any"},
-        "portal": "https://nsap.nic.in/", "id": "pension_disability",
+        "portal": "http://127.0.0.1:8000/mock/pension.html", "id": "pension_disability",
     },
 ]
 

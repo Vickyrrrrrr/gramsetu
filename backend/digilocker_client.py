@@ -33,10 +33,10 @@ def _get_demo_data(form_type: str) -> dict:
     
     if form_type == "ration_card":
         data = {"applicant_name": aadhaar["name_en"], "aadhaar_number": aadhaar["aadhaar_number"].replace(" ", ""), "date_of_birth": aadhaar["date_of_birth"], "gender": aadhaar["gender"].lower(), "family_head_name": aadhaar["name_en"], "family_members": 4, "annual_income": 120000, "category": "BPL", "mobile_number": aadhaar["mobile_number"], "address": {"line1": aadhaar["address_line1"], "line2": aadhaar["address_line2"], "district": aadhaar["district"], "state": aadhaar["state"], "pincode": aadhaar["pincode"]}}
-        conf = {"applicant_name": 0.98, "aadhaar_number": 0.99, "date_of_birth": 0.98, "gender": 0.98, "family_head_name": 0.60, "family_members": 0.30, "annual_income": 0.30, "category": 0.40, "mobile_number": 0.95, "address": 0.95}
+        conf = {"applicant_name": 0.98, "aadhaar_number": 0.99, "date_of_birth": 0.98, "gender": 0.98, "family_head_name": 0.90, "family_members": 0.90, "annual_income": 0.90, "category": 0.90, "mobile_number": 0.95, "address": 0.95}
     elif form_type == "pension":
         data = {"applicant_name": aadhaar["name_en"], "aadhaar_number": aadhaar["aadhaar_number"].replace(" ", ""), "date_of_birth": aadhaar["date_of_birth"], "pension_type": "old_age", "gender": aadhaar["gender"].lower(), "mobile_number": aadhaar["mobile_number"], "annual_income": 60000, "address": {"line1": aadhaar["address_line1"], "line2": aadhaar["address_line2"], "district": aadhaar["district"], "state": aadhaar["state"], "pincode": aadhaar["pincode"]}, "bank_account": bank}
-        conf = {"applicant_name": 0.98, "aadhaar_number": 0.99, "date_of_birth": 0.98, "gender": 0.98, "mobile_number": 0.95, "address": 0.95, "pension_type": 0.40, "annual_income": 0.30, "bank_account": 0.90}
+        conf = {"applicant_name": 0.98, "aadhaar_number": 0.99, "date_of_birth": 0.98, "gender": 0.98, "mobile_number": 0.95, "address": 0.95, "pension_type": 0.90, "annual_income": 0.90, "bank_account": 0.90}
     else:
         data = {"full_name": aadhaar["name_en"], "aadhaar_number": aadhaar["aadhaar_number"].replace(" ", ""), "date_of_birth": aadhaar["date_of_birth"], "gender": aadhaar["gender"].lower(), "mobile_number": aadhaar["mobile_number"], "address": {"line1": aadhaar["address_line1"], "line2": aadhaar["address_line2"], "district": aadhaar["district"], "state": aadhaar["state"], "pincode": aadhaar["pincode"]}}
         conf = {"full_name": 0.98, "aadhaar_number": 0.99, "date_of_birth": 0.98, "gender": 0.98, "mobile_number": 0.95, "address": 0.95}

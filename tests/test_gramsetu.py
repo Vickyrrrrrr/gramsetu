@@ -291,7 +291,7 @@ class TestDigiLockerData:
     """Test DigiLocker demo data extraction."""
 
     def test_ration_card_demo_data(self):
-        from backend.mcp_servers.digilocker_mcp import _get_demo_data
+        from backend.digilocker_client import _get_demo_data
         result = _get_demo_data("ration_card")
         data = result["extracted_data"]
         assert data["applicant_name"] == "Ram Kumar Sharma"
@@ -300,7 +300,7 @@ class TestDigiLockerData:
         assert result["ready_to_submit"] is True
 
     def test_pension_demo_data(self):
-        from backend.mcp_servers.digilocker_mcp import _get_demo_data
+        from backend.digilocker_client import _get_demo_data
         result = _get_demo_data("pension")
         data = result["extracted_data"]
         assert "applicant_name" in data
@@ -308,7 +308,7 @@ class TestDigiLockerData:
         assert "bank_account" in data
 
     def test_identity_demo_data(self):
-        from backend.mcp_servers.digilocker_mcp import _get_demo_data
+        from backend.digilocker_client import _get_demo_data
         result = _get_demo_data("identity")
         data = result["extracted_data"]
         assert data["document_type"] == "pan_card"
@@ -320,12 +320,12 @@ class TestAppRuntime:
     """Smoke tests for startup import and async API wiring."""
 
     def test_main_app_imports(self):
-        import whatsapp_bot.main as main_mod
-        assert hasattr(main_mod, "app")
+        import server as server_mod
+        assert hasattr(server_mod, "app")
 
     def test_api_schemes_async_handler(self, monkeypatch):
         from fastapi.testclient import TestClient
-        import whatsapp_bot.main as main_mod
+        import server as server_mod
 
         async def _fake_discover_schemes(**kwargs):
             return {
@@ -340,8 +340,8 @@ class TestAppRuntime:
                 }],
             }
 
-        monkeypatch.setattr(main_mod, "discover_schemes", _fake_discover_schemes)
-        client = TestClient(main_mod.app)
+        monkeypatch.setattr(server_mod, "discover_schemes", _fake_discover_schemes)
+        client = TestClient(server_mod.app)
         response = client.post("/api/schemes", json={"age": 40, "language": "hi"})
         assert response.status_code == 200
         payload = response.json()

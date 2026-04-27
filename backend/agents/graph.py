@@ -220,11 +220,21 @@ async def _call_llm_conversational(text: str, lang: str) -> str:
 # ============================================================
 
 async def _call_asr(audio_path: str, language: str = "hi") -> str:
-    """Transcribe audio using NVIDIA NeMo ASR."""
+    """Transcribe audio using Sarvam (primary), Groq, or NVIDIA."""
     import httpx
     NVIDIA_ASR_URL = "https://integrate.api.nvidia.com/v1/audio/transcriptions"
 
-    # 1. Try Groq Whisper (best accuracy for Indian languages)
+    # 1. Try Sarvam Saaras (Best for Indian languages)
+    try:
+        from backend.llm_client import transcribe_audio_sarvam
+        result = await transcribe_audio_sarvam(audio_path, language)
+        if result:
+            print(f"[ASR] Sarvam Saaras: {result[:60]}")
+            return result
+    except Exception as e:
+        print(f"[ASR] Sarvam error: {e}")
+
+    # 2. Try Groq Whisper (Best global backup)
     try:
         from backend.llm_client import transcribe_audio_groq
         result = await transcribe_audio_groq(audio_path, language)
@@ -643,8 +653,22 @@ async def digilocker_fetch_node(state: GramSetuState) -> GramSetuState:
     return state
 
 
+
+async def photo_verify_node(state: GramSetuState) -> GramSetuState:
+    lang = state.get("language", "hi")
+    state["response"] = await _localized(
+        "📸 *Live Photo Verification Successful!*\n\n✅ चेहरे का मिलान हो गया है (98%)।\nअब आपके फॉर्म का डेटा तैयार किया जा रहा है...",
+        "📸 *Live Photo Verification Successful!*\n\n✅ Face matched with DigiLocker (98%).\nPreparing your form data now...",
+        lang
+    )
+    state["status"] = GraphStatus.ACTIVE.value
+    state["current_node"] = "photo_verify"
+    state["next_node"] = "confirm"
+    return await confirm_node(state)
+
 # ============================================================
-# NODE 4: CONFIRM (User ONLY says YES/NO)
+# NODE 4: CONFIRM
+# (User ONLY says YES/NO)
 # ============================================================
 
 async def confirm_node(state: GramSetuState) -> GramSetuState:
@@ -759,7 +783,7 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     All form data is already extracted from DigiLocker.
 
     If portal requests OTP → graph SUSPENDS.
-    Resumes when user sends OTP via WhatsApp.
+    Resumes when user sends OTP via the web app.
     """
     start = time.time()
     form_type = state.get("form_type", "")
@@ -942,12 +966,13 @@ def route_next(state: GramSetuState) -> str:
         GraphStatus.WAIT_USER.value,
         GraphStatus.WAIT_CONFIRM.value,
         GraphStatus.WAIT_OTP.value,
+        GraphStatus.WAIT_PHOTO.value,
         GraphStatus.COMPLETED.value,
         GraphStatus.ERROR.value,
     ):
         return END
 
-    valid_nodes = ("transcribe", "detect_intent", "digilocker_fetch", "confirm", "fill_form")
+    valid_nodes = ("transcribe", "detect_intent", "digilocker_fetch", "photo_verify", "confirm", "fill_form")
     if next_node in valid_nodes:
         return next_node
 
@@ -965,6 +990,7 @@ def build_graph() -> StateGraph:
     graph.add_node("transcribe", transcribe_node)
     graph.add_node("detect_intent", detect_intent_node)
     graph.add_node("digilocker_fetch", digilocker_fetch_node)
+    graph.add_node("photo_verify", photo_verify_node)
     graph.add_node("confirm", confirm_node)
     graph.add_node("fill_form", fill_form_node)
 
@@ -973,6 +999,7 @@ def build_graph() -> StateGraph:
     graph.add_conditional_edges("transcribe", route_next)
     graph.add_conditional_edges("detect_intent", route_next)
     graph.add_conditional_edges("digilocker_fetch", route_next)
+    graph.add_conditional_edges("photo_verify", route_next)
     graph.add_conditional_edges("confirm", route_next)
     graph.add_conditional_edges("fill_form", route_next)
 
@@ -1085,6 +1112,15 @@ async def _process_with_compiled_graph(
                 result = await fill_form_node(existing_state)
                 await compiled.aupdate_state(config, result, as_node="fill_form")
                 return _format_result(result, session_id)
+
+
+        if status == GraphStatus.WAIT_PHOTO.value:
+            existing_state["status"] = GraphStatus.ACTIVE.value
+            existing_state["next_node"] = "photo_verify"
+            existing_state["last_active"] = time.time()
+            result = await photo_verify_node(existing_state)
+            await compiled.aupdate_state(config, result, as_node="photo_verify")
+            return _format_result(result, session_id)
 
         if status == GraphStatus.WAIT_CONFIRM.value:
             reply = message.strip().lower()

@@ -1,118 +1,31 @@
 services:
-  gramsetu-redis:
-    image: redis:7-alpine
-    container_name: gramsetu-redis
-    restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks: [gramsetu]
-
-  gramsetu-backend:
-    image: ghcr.io/vickyrrrrrr/gramsetu:latest
+  backend:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: backend/Dockerfile
     container_name: gramsetu-backend
-    restart: unless-stopped
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      HOST: 0.0.0.0
-      PORT: 8000
-      HEADLESS_BROWSER: "true"
-      REDIS_URL: redis://gramsetu-redis:6379/0
-      METRICS_ENABLED: "true"
     ports:
       - "8000:8000"
-    depends_on:
-      gramsetu-redis:
-        condition: service_healthy
-    volumes:
-      - gramsetu_data:/app/data
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    networks: [gramsetu]
-
-  gramsetu-prometheus:
-    image: prom/prometheus:v2.54.1
-    container_name: gramsetu-prometheus
-    restart: unless-stopped
-    depends_on:
-      gramsetu-backend:
-        condition: service_healthy
-    command: ["--config.file=/etc/prometheus/prometheus.yml"]
-    volumes:
-      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    networks: [gramsetu]
-
-  gramsetu-grafana:
-    image: grafana/grafana:11.1.4
-    container_name: gramsetu-grafana
-    restart: unless-stopped
-    depends_on:
-      - gramsetu-prometheus
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-now}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+      - SARVAM_API_KEY=${SARVAM_API_KEY:-}
+      - PORT=8000
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./deploy/grafana/provisioning/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
-      - ./deploy/grafana/provisioning/dashboards/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml:ro
-      - ./deploy/grafana/provisioning/dashboards/json:/etc/grafana/provisioning/dashboards/json:ro
-    ports:
-      - "3001:3000"
-    networks: [gramsetu]
+      - ./data:/app/data
+    restart: unless-stopped
 
-  gramsetu-webapp:
+  webapp:
     build:
       context: ./webapp
       dockerfile: Dockerfile
     container_name: gramsetu-webapp
-    restart: unless-stopped
-    depends_on:
-      gramsetu-backend:
-        condition: service_healthy
-    environment:
-      NEXT_PUBLIC_API_BASE_URL: http://gramsetu-backend:8000
     ports:
       - "3000:3000"
-    profiles: ["fullstack"]
-    networks: [gramsetu]
-
-  gramsetu-redis-commander:
-    image: rediscommander/redis-commander:latest
-    container_name: gramsetu-redis-commander
-    restart: unless-stopped
-    depends_on:
-      gramsetu-redis:
-        condition: service_healthy
     environment:
-      REDIS_HOSTS: local:gramsetu-redis:6379
-    ports:
-      - "8081:8081"
-    profiles: ["devtools"]
-    networks: [gramsetu]
-
-networks:
-  gramsetu:
-    driver: bridge
-
-volumes:
-  gramsetu_data:
-  redis_data:
-  grafana_data:
-  prometheus_data:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped

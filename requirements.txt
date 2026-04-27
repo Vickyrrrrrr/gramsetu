@@ -11,6 +11,7 @@ python-multipart>=0.0.20
 # ── LLM Clients ─────────────────────────────────────────────
 openai>=1.60.0
 httpx>=0.28.0
+websockets>=13.0
 
 # ── Browser Automation (form filling) ──────────────────────
 playwright>=1.49.0

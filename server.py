@@ -43,13 +43,20 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Specific mount for mock portals (DEMO MODE)
+app.mount("/mock", StaticFiles(directory=os.path.join(STATIC_DIR, "backend", "static", "mock_portals")), name="mock")
 
 # ── Startup ─────────────────────────────────────────────
 @app.on_event("startup")
 async def startup():
     if sys.stdout.encoding != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    db.init_db()
+    try:
+        db.init_db()
+    except RuntimeError:
+        print("[DB] Supabase not configured - skipping database (prototype mode)")
+    except Exception as e:
+        print(f"[DB] Database warning: {e}")
     from backend.llm_client import _groq_ok, _nim_ok, GROQ_MODEL_MAIN
     print(f"\nGramSetu API | Groq: {'OK' if _groq_ok() else 'NO KEY'} | NIM: {'OK' if _nim_ok() else 'NO KEY'}")
     print(f"API Docs: http://localhost:{os.getenv('PORT','8000')}/docs\n")
@@ -58,9 +65,15 @@ async def startup():
 async def _process(user_id: str, phone: str, message: str, message_type: str = "text") -> dict:
     message = sanitize_input(message)
     session = _user_sessions.get(phone, {})
+    session_id = session.get("session_id")
     lang = detect_language(message) if message else "hi"
-    result = await v3_process_message(user_id=user_id, user_phone=phone, message=message, message_type=message_type, language=lang)
-    _user_sessions[phone] = {"session_id": result.get("session_id", session.get("session_id")), "created_at": session.get("created_at", time.time()), "last_active": time.time()}
+    result = await v3_process_message(user_id=user_id, user_phone=phone, message=message, message_type=message_type, language=lang, session_id=session_id)
+    result_session_id = result.get("session_id", "")
+    if session_id and result_session_id and session_id != result_session_id:
+        print(f"[Session] Resumed session {session_id[:8]}...")
+    elif result_session_id and not session_id:
+        print(f"[Session] New session {result_session_id[:8]}...")
+    _user_sessions[phone] = {"session_id": result_session_id, "created_at": session.get("created_at", time.time()), "last_active": time.time()}
     _impact["users_served"].add(phone)
     if result.get("status") == GraphStatus.COMPLETED.value:
         _impact["forms_filled"] += 1
@@ -69,6 +82,8 @@ async def _process(user_id: str, phone: str, message: str, message_type: str = "
             _completed_forms[sid] = {"form_type": result.get("form_type", ""), "form_data": result.get("form_data", {}), "reference_number": result.get("reference_number", ""), "timestamp": __import__("datetime").datetime.now().isoformat()}
     try:
         db.log_conversation(user_id=user_id, user_phone=phone, direction="incoming", original_text=message, detected_language=result.get("language", "hi"), bot_response=result.get("response", ""), active_agent=result.get("current_node", ""), message_type=message_type)
+    except RuntimeError:
+        pass  # Supabase not configured
     except Exception as e:
         print(f"[DB] {e}")
     return result
@@ -94,7 +109,24 @@ async def chat_api(request: Request):
     screenshot_url = f"data:image/png;base64,{result.get('screenshot_b64', '')}" if result.get("screenshot_b64") else None
     return JSONResponse({"success": True, "response": result["response"], "status": result.get("status", ""), "session_id": result.get("session_id", ""), "language": result.get("language", "hi"), "form_type": result.get("form_type", ""), "form_data": result.get("form_data", {}), "confidence_scores": result.get("confidence_scores", {}), "screenshot_url": screenshot_url, "digilocker_auth_status": result.get("digilocker_auth_status"), "receipt_url": f"/api/receipt/{result['session_id']}" if result.get("receipt_ready") and result.get("session_id") else None})
 
-# ── Voice ───────────────────────────────────────────────
+# ── Browser Control ───────────────────────────────────────
+@app.post("/api/browser/stop")
+async def stop_browser(request: Request):
+    body = await request.json()
+    phone = body.get("phone", "")
+    session_id = body.get("session_id", "")
+    
+    if not session_id and phone:
+        session = _user_sessions.get(phone, {})
+        session_id = session.get("session_id")
+    
+    if session_id:
+        from backend.agents.form_fill_agent import _cancel_signals
+        _cancel_signals[session_id] = True
+        return {"status": "stopping", "session_id": session_id}
+    return JSONResponse(status_code=404, content={"error": "Session not found"})
+
+# ── Voice API ───────────────────────────────────
 @app.post("/api/voice")
 async def voice_input(request: Request):
     content_type = request.headers.get("content-type", "")
@@ -108,22 +140,131 @@ async def voice_input(request: Request):
         audio_bytes = await request.body()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio")
+    
     voice_cache_dir = os.path.join(STATIC_DIR, "data", "voice_cache")
     os.makedirs(voice_cache_dir, exist_ok=True)
     suffix = ".webm" if b"webm" in audio_bytes[:32] else ".wav"
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=voice_cache_dir)
     tmp.write(audio_bytes)
     tmp.close()
+    
     try:
-        text = await asyncio.to_thread(transcribe_audio, tmp.name, "hi")
-    except Exception:
+        # Use llm_client functions (Sarvam -> Groq -> NVIDIA)
+        from backend.llm_client import transcribe_audio_sarvam, transcribe_audio_groq, transcribe_audio_nvidia
+        text = await transcribe_audio_sarvam(tmp.name)
+        if not text:
+            text = await transcribe_audio_groq(tmp.name)
+        if not text:
+            text = await transcribe_audio_nvidia(tmp.name)
+    except Exception as e:
+        print(f"[Voice] Transcription error: {e}")
         text = ""
     finally:
         try: os.unlink(tmp.name)
         except Exception: pass
+    
     if not text:
         return JSONResponse({"text": "", "language_detected": "hi", "confidence": 0.0})
     return JSONResponse({"text": text, "language_detected": detect_language(text), "confidence": 0.85})
+
+
+# ── Realtime Voice API (WebSocket) ─────────────────
+@app.websocket("/api/voice/realtime")
+async def websocket_realtime_voice(websocket: WebSocket):
+    """Realtime STT via Sarvam WebSocket API."""
+    await websocket.accept()
+    
+    import os
+    SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
+    
+    if not SARVAM_API_KEY or SARVAM_API_KEY == "your_sarvam_key_here":
+        await websocket.send_json({"type": "error", "message": "Sarvam API key not configured"})
+        await websocket.close()
+        return
+    
+    try:
+        import websockets
+        import json
+        
+        sarvam_ws = await websockets.connect(
+            "wss://api.sarvam.ai/speech-to-text-realtime",
+            extra_headers={"api-subscription-key": SARVAM_API_KEY}
+        )
+        
+        # Handle start message
+        start_msg = await websocket.receive_json()
+        language = start_msg.get("language", "hi")
+        
+        # Send config to Sarvam
+        await sarvam_ws.send(json.dumps({
+            "type": "config",
+            "language_code": f"{language}-IN",
+            "model": "saaras:v3",
+            "audio_format": "pcm",
+            "sample_rate": 16000
+        }))
+        
+        async def receive_from_client():
+            try:
+                while True:
+                    try:
+                        data = await asyncio.wait_for(websocket.receive(), timeout=0.1)
+                        if "bytes" in data and data["bytes"]:
+                            await sarvam_ws.send(data["bytes"])
+                        elif "text" in data:
+                            msg = json.loads(data["text"])
+                            if msg.get("type") == "stop":
+                                break
+                    except asyncio.TimeoutError:
+                        continue
+            except Exception:
+                pass
+            finally:
+                await sarvam_ws.close()
+        
+        async def receive_from_sarvam():
+            try:
+                async for message in sarvam_ws:
+                    if isinstance(message, str):
+                        data = json.loads(message)
+                        await websocket.send_json({
+                            "type": "transcript",
+                            "text": data.get("transcript", ""),
+                            "is_final": data.get("is_final", False)
+                        })
+            except Exception as e:
+                print(f"[Realtime STT] Sarvam error: {e}")
+        
+        await asyncio.gather(receive_from_client(), receive_from_sarvam(), return_exceptions=True)
+        
+    except Exception as e:
+        print(f"[Realtime STT] Error: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
+
+# ── Voice Output (TTS) ──────────────────────────────────
+@app.post("/api/tts")
+async def voice_output(request: Request):
+    body = await request.json()
+    text = body.get("text", "")
+    lang = body.get("language", "hi")
+    if not text:
+        raise HTTPException(status_code=400, detail="Text required")
+    
+    from lib.voice_handler import generate_voice
+    audio_bytes = await generate_voice(text, lang)
+    if not audio_bytes:
+        raise HTTPException(status_code=500, detail="TTS generation failed")
+    
+    from fastapi.responses import Response
+    return Response(content=audio_bytes, media_type="audio/wav")
 
 # ── Schemes ─────────────────────────────────────────────
 @app.post("/api/schemes")

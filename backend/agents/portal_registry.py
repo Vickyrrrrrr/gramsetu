@@ -15,19 +15,20 @@ automatically use the correct config.
 from typing import Optional
 
 # ── Portal URLs per form type ────────────────────────────────
+# DEMO MODE: Using local mock portals for reliability
 PORTAL_URLS: dict[str, str] = {
-    "ration_card":        "https://nfsa.gov.in/",
-    "pension":            "https://nsap.nic.in/",
-    "ayushman_bharat":   "https://pmjay.gov.in/",
-    "mnrega":             "https://nrega.nic.in/",
-    "pan_card":           "https://www.onlineservices.nsdl.com/paam/",
-    "voter_id":           "https://voters.eci.gov.in/",
-    "identity":           "https://www.onlineservices.nsdl.com/paam/",
-    "caste_certificate": "https://services.india.gov.in/service/detail/apply-for-caste-certificate",
-    "birth_certificate": "https://crsorgi.gov.in/",
-    "pm_kisan":           "https://pmkisan.gov.in/",
-    "kisan_credit_card": "https://www.kisancreditcard.in/",
-    "jan_dhan":           "https://pmjdy.gov.in/",
+    "ration_card":        "http://127.0.0.1:8000/mock/ration_card.html",
+    "pension":            "http://127.0.0.1:8000/mock/pension.html",
+    "ayushman_bharat":   "http://127.0.0.1:8000/mock/ayushman_bharat.html",
+    "mnrega":             "http://127.0.0.1:8000/mock/ration_card.html", # Reuse ration for demo
+    "pan_card":           "http://127.0.0.1:8000/mock/pan_card.html",
+    "voter_id":           "http://127.0.0.1:8000/mock/pan_card.html",   # Reuse pan for demo
+    "identity":           "http://127.0.0.1:8000/mock/pan_card.html",
+    "caste_certificate": "http://127.0.0.1:8000/mock/ration_card.html",
+    "birth_certificate": "http://127.0.0.1:8000/mock/ration_card.html",
+    "pm_kisan":           "http://127.0.0.1:8000/mock/ration_card.html",
+    "kisan_credit_card": "http://127.0.0.1:8000/mock/ration_card.html",
+    "jan_dhan":           "http://127.0.0.1:8000/mock/pension.html",
 }
 
 # ── Portal Names ──────────────────────────────────────────

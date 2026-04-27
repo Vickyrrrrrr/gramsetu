@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Send, Loader2, ChevronRight, X, Mic, MicOff,
   Activity, RefreshCw, Globe, Image as ImageIcon, Wifi, WifiOff,
-  Minimize2, Maximize2, Monitor, Volume2, Lock, ShieldCheck, Database, ExternalLink,
+  Minimize2, Maximize2, Monitor, Volume2, Lock, ShieldCheck, Database,
 } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════
@@ -615,8 +615,6 @@ function BrowserPreview({
 }) {
   if (!frame) return null
 
-  const isLoading = frame === 'loading'
-
   /* minimized pill with pulsing effect */
   if (minimized) {
     return (
@@ -669,7 +667,9 @@ function BrowserPreview({
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
           <span className="text-xs font-bold tracking-tight flex items-center gap-1.5">
-            <Monitor size={14} /> LIVE PORTAL FILLING</span></div>
+            <Monitor size={14} /> LIVE PORTAL FILLING
+          </span>
+        </div>
         <div className="flex items-center gap-2">
           <button 
             onClick={onMinimize} 
@@ -690,18 +690,11 @@ function BrowserPreview({
 
       {/* portal viewport */}
       <div className="aspect-[4/3] bg-[#1A1A1A] relative group">
-        {isLoading ? (
-          <div className="w-full h-full flex flex-col items-center justify-center gap-3">
-            <Loader2 className="w-8 h-8 text-green-500 animate-spin" />
-            <p className="text-[10px] text-white/50 font-bold uppercase tracking-widest">Connecting to Portal...</p>
-          </div>
-        ) : (
-          <img
-            src={frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}`}
-            alt="Portal View"
-            className="w-full h-full object-contain"
-          />
-        )}
+        <img
+          src={frame.startsWith('data:') ? frame : `data:image/jpeg;base64,${frame}`}
+          alt="Portal View"
+          className="w-full h-full object-contain"
+        />
         <div className="absolute bottom-3 left-3 right-3 flex items-center gap-3 bg-black/60 backdrop-blur-md px-3 py-2 rounded-xl border border-white/10">
           <div className="flex-1">
             <div className="text-[10px] text-white/50 uppercase font-bold tracking-wider mb-0.5">Current Action</div>
@@ -715,6 +708,14 @@ function BrowserPreview({
           </button>
         </div>
       </div>
+
+      {/* screenshot */}
+      <img
+        src={`data:image/jpeg;base64,${frame}`}
+        alt="Browser preview"
+        className="w-full"
+        style={{ maxHeight: 280, objectFit: 'cover', objectPosition: 'top' }}
+      />
 
       {/* progress footer */}
       <div className="px-3 py-2" style={{ borderTop: '1px solid #E5E5E0' }}>
@@ -786,6 +787,7 @@ export default function AppPage() {
   // MCP panel
   const [mcpOpen, setMcpOpen] = useState(false)
   const [mcpServers, setMcpServers] = useState<McpServer[]>([
+    { name: 'WhatsApp MCP', port: 8100, online: false, lastPing: '' },
     { name: 'Browser MCP', port: 8101, online: false, lastPing: '' },
     { name: 'Audit MCP', port: 8102, online: false, lastPing: '' },
     { name: 'DigiLocker MCP', port: 8103, online: false, lastPing: '' },
@@ -798,7 +800,6 @@ export default function AppPage() {
   // Voice recording
   const [recording, setRecording] = useState(false)
   const [voiceSupported, setVoiceSupported] = useState(true)
-  const [liveTranscript, setLiveTranscript] = useState('') // realtime interim transcript
   const mediaRecRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
 
@@ -902,11 +903,13 @@ export default function AppPage() {
         const data = await res.json()
         const now = new Date().toLocaleTimeString()
         setMcpServers([
+          { name: 'WhatsApp MCP', port: 8100, online: !!data.whatsapp, lastPing: now },
           { name: 'Browser MCP', port: 8101, online: !!data.browser, lastPing: now },
           { name: 'Audit MCP', port: 8102, online: !!data.audit, lastPing: now },
           { name: 'DigiLocker MCP', port: 8103, online: !!data.digilocker, lastPing: now },
         ])
         const offline = []
+        if (!data.whatsapp) offline.push('WhatsApp')
         if (!data.digilocker) offline.push('DigiLocker')
         if (!data.browser) offline.push('Browser')
         setMcpWarning(
@@ -925,6 +928,8 @@ export default function AppPage() {
   /* ── Browser preview WebSocket — always-on with auto-reconnect ── */
   useEffect(() => {
     const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const apiEnv = process.env.NEXT_PUBLIC_API_URL || ''
+    const backendHost = apiEnv ? apiEnv.replace(/^https?:\/\//, '') : window.location.host
     let ws: WebSocket | null = null
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let alive = true
@@ -932,8 +937,7 @@ export default function AppPage() {
     const connect = () => {
       if (!alive) return
       try {
-        const wsHost = `${window.location.hostname}:8000`
-        ws = new WebSocket(`${wsProto}://${wsHost}/ws/browser/${userId}`)
+        ws = new WebSocket(`${wsProto}://${backendHost}/ws/browser/${userId}`)
       } catch { return }
       wsRef.current = ws
 
@@ -950,6 +954,7 @@ export default function AppPage() {
 
       ws.onclose = () => {
         wsRef.current = null
+        // Reconnect after 3 s — keeps the channel ready for the next form-fill
         if (alive) reconnectTimer = setTimeout(connect, 3000)
       }
 
@@ -1101,118 +1106,6 @@ export default function AppPage() {
     }
   }, [pendingPrompt, callBackend])
 
-  /* ── voice recording (realtime WebSocket) ── */
-  const realtimeWs = useRef<WebSocket | null>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
-  const processorRef = useRef<ScriptProcessorNode | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  // Stable ref so ws callbacks can call stopRealtimeVoice without stale closures
-  const stopRealtimeVoiceRef = useRef<() => void>(() => {})
-
-  const stopRealtimeVoice = useCallback(() => {
-    if (realtimeWs.current) {
-      try { realtimeWs.current.send(JSON.stringify({ type: 'stop' })) } catch {}
-      realtimeWs.current.close()
-      realtimeWs.current = null
-    }
-    if (processorRef.current) {
-      processorRef.current.disconnect()
-      processorRef.current = null
-    }
-    if (audioContextRef.current) {
-      audioContextRef.current.close()
-      audioContextRef.current = null
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop())
-      streamRef.current = null
-    }
-    setRecording(false)
-    setLiveTranscript('')
-  }, [])
-
-  // Keep the ref always pointing at the latest stop function
-  useEffect(() => {
-    stopRealtimeVoiceRef.current = stopRealtimeVoice
-  }, [stopRealtimeVoice])
-
-  const startRealtimeVoice = useCallback(async () => {
-    if (!voiceSupported) return
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } })
-      streamRef.current = stream
-      // Determine host from window location but target the backend port 8000 directly
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const wsUrl = `${wsProtocol}//${window.location.hostname}:8000/api/voice/realtime`
-      const ws = new WebSocket(wsUrl)
-      realtimeWs.current = ws
-
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'start', language: langOverride || 'hi' }))
-        setRecording(true)
-        setLiveTranscript('')
-
-        const audioContext = new AudioContext({ sampleRate: 16000 })
-        audioContextRef.current = audioContext
-        const source = audioContext.createMediaStreamSource(stream)
-        const processor = audioContext.createScriptProcessor(4096, 1, 1)
-        processorRef.current = processor
-
-        processor.onaudioprocess = (e) => {
-          if (ws.readyState === WebSocket.OPEN) {
-            const inputData = e.inputBuffer.getChannelData(0)
-            const pcmData = new Int16Array(inputData.length)
-            for (let i = 0; i < inputData.length; i++) {
-              pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff
-            }
-            ws.send(pcmData.buffer)
-          }
-        }
-
-        source.connect(processor)
-        processor.connect(audioContext.destination)
-      }
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          if (data.type === 'error') {
-            console.error('[Realtime STT] Server error:', data.message)
-            setLiveTranscript('')
-            stopRealtimeVoiceRef.current()
-            return
-          }
-          if (data.type === 'transcript' && data.text) {
-            setLiveTranscript(data.text)
-            if (data.is_final) {
-              const finalText = data.text
-              setInput(finalText)
-              setLiveTranscript('')
-              stopRealtimeVoiceRef.current()
-              setTimeout(() => handleSend(finalText), 100)
-            }
-          }
-        } catch (e) {
-          console.error('Realtime voice parse error:', e)
-        }
-      }
-
-      ws.onerror = (err) => {
-        console.error('[Realtime STT] WebSocket error:', err)
-        stopRealtimeVoiceRef.current()
-      }
-
-      ws.onclose = () => {
-        setRecording(false)
-        setLiveTranscript('')
-      }
-    } catch (err) {
-      console.error('[Realtime STT] getUserMedia failed:', err)
-      alert('Microphone access denied or hardware not found. Please check browser permissions.')
-      setRecording(false)
-    }
-  }, [voiceSupported, handleSend, langOverride])
-  /* ── legacy voice recording (fallback) ─────────────────────── */
   /* ── voice recording ───────────────────────────────────────── */
   const startRecording = useCallback(async () => {
     if (!voiceSupported) return
@@ -1317,23 +1210,6 @@ export default function AppPage() {
             }}
           />
 
-          {/* Live Portal Button (New) */}
-          {(browserFrame || status === 'loading') && (
-            <button
-              onClick={() => {
-                setBrowserMinimized(false)
-                if (!browserFrame) {
-                  // Fallback to show the panel if it's not open
-                  setBrowserFrame('loading')
-                }
-              }}
-              className="text-[10px] px-2.5 py-1 rounded-full flex items-center gap-1 font-bold animate-pulse"
-              style={{ border: '1px solid #22c55e', color: '#22c55e', background: '#f0fdf4' }}
-            >
-              <Monitor size={11} /> LIVE PORTAL
-            </button>
-          )}
-
           {/* New conversation button (Upgrade 5) */}
           <button
             onClick={handleNewConversation}
@@ -1343,18 +1219,6 @@ export default function AppPage() {
           >
             <RefreshCw size={12} />
           </button>
-
-          {/* GitHub button (New) */}
-          <a
-            href="https://github.com/Vickyrrrrrr/gramsetu"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs px-2.5 py-1 rounded-full transition-colors flex items-center gap-1.5"
-            style={{ border: '1px solid #E5E5E0', color: '#6B6B6B' }}
-            title="View Source on GitHub"
-          >
-            <Github size={12} />
-          </a>
 
           {/* Phone button */}
           <button
@@ -1509,19 +1373,6 @@ export default function AppPage() {
         </div>
       )}
 
-      {/* ── Live transcript overlay (realtime STT) ───────────────── */}
-      {liveTranscript && (
-        <div
-          className="flex-shrink-0 px-4 py-2 flex items-start gap-2"
-          style={{ background: '#eff6ff', color: '#1d4ed8', borderTop: '1px solid #bfdbfe' }}
-        >
-          <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-pulse mt-1 flex-shrink-0" />
-          <p className="text-xs leading-relaxed italic">
-            {liveTranscript}
-          </p>
-        </div>
-      )}
-
       {/* ── Recording indicator (Upgrade 3) ──────────────────── */}
       {recording && (
         <div
@@ -1529,7 +1380,7 @@ export default function AppPage() {
           style={{ background: '#fee2e2', color: '#dc2626', borderTop: '1px solid #fecaca' }}
         >
           <span className="inline-block w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-          🎙️ Listening… speak now, tap mic to stop
+          Recording… click mic again to stop
         </div>
       )}
 
@@ -1563,7 +1414,7 @@ export default function AppPage() {
         {/* Mic button (Upgrade 3) */}
         {voiceSupported && (
           <button
-            onClick={recording ? stopRealtimeVoice : startRealtimeVoice}
+            onClick={recording ? stopRecording : startRecording}
             className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-opacity"
             style={{
               background: recording ? '#dc2626' : '#0C0C0C',

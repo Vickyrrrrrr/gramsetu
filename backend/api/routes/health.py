@@ -131,7 +131,6 @@ async def mcp_status():
     from datetime import datetime, timezone
     from backend.llm_client import _groq_ok, _nim_ok
     ports = {
-        "whatsapp":   int(os.getenv("MCP_WHATSAPP_PORT",   "8100")),
         "browser":    int(os.getenv("MCP_BROWSER_PORT",    "8101")),
         "audit":      int(os.getenv("MCP_AUDIT_PORT",      "8102")),
         "digilocker": int(os.getenv("MCP_DIGILOCKER_PORT", "8103")),

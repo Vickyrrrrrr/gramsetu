@@ -7,6 +7,7 @@ REST API server for the GramSetu web app.
 Endpoints:
   POST /api/chat             -- Chat with the AI agent
   POST /api/voice            -- Upload audio, get transcription
+  WebSocket /api/voice/realtime -- Realtime STT via Sarvam
   POST /api/otp/{user_id}    -- Resume a form fill after OTP
   POST /api/schemes          -- Discover eligible schemes
   POST /api/tts              -- Generate TTS audio
@@ -16,7 +17,7 @@ Endpoints:
   GET  /api/mcp-status       -- MCP + LLM provider status
   GET  /callback/digilocker  -- DigiLocker OAuth callback
 
-Application assembly module for GramSetu. Imported by whatsapp_bot.main.
+Application assembly module for GramSetu.
 """
 
 import os
@@ -30,19 +31,18 @@ from backend.core import get_settings
 from backend.core.cache import get_cache, close_cache
 from backend.core.metrics import instrument_fastapi
 from backend.api.routes.voice import router as voice_router
+from backend.api.routes.voice_realtime import router as voice_realtime_router
 from backend.api.routes.chat import router as chat_router
 from backend.api.routes.services import router as services_router
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from whatsapp_bot.voice_handler import transcribe_audio
-from whatsapp_bot.language_utils import detect_language
 from backend.storage import db
 from backend.orchestrator.flow import process_message as v3_process_message
 from backend.orchestrator.models import GraphStatus
 from backend.integrations.security import api_limiter, sanitize_input, validate_otp_input
 from backend.integrations.schemes import discover_schemes
-from backend.integrations.voice import text_to_speech
+from backend.voice_tts import text_to_speech
 from backend.services.session_store import (
     get_chat_session,
     save_chat_session,
@@ -108,6 +108,7 @@ if settings.metrics_enabled:
 from backend.api.routes.health import router as health_router
 app.include_router(health_router)
 app.include_router(voice_router)
+app.include_router(voice_realtime_router)
 app.include_router(chat_router)
 app.include_router(services_router)
 
@@ -164,7 +165,6 @@ def _start_mcp_servers():
     import threading
 
     mcp_configs = [
-        ("WhatsApp",   "backend.mcp_servers.whatsapp_mcp",   int(os.getenv("MCP_WHATSAPP_PORT",   "8100"))),
         ("Audit",      "backend.mcp_servers.audit_mcp",      int(os.getenv("MCP_AUDIT_PORT",      "8102"))),
         ("Browser",    "backend.mcp_servers.browser_mcp",    int(os.getenv("MCP_BROWSER_PORT",    "8101"))),
         ("DigiLocker", "backend.mcp_servers.digilocker_mcp", int(os.getenv("MCP_DIGILOCKER_PORT", "8103"))),
@@ -184,7 +184,7 @@ def _start_mcp_servers():
     for name, module, port in mcp_configs:
         threading.Thread(target=_run_mcp, args=(name, module, port), daemon=True).start()
 
-    print("[MCP] 4 servers: WhatsApp :8100 | Browser :8101 | Audit :8102 | DigiLocker :8103")
+    print("[MCP] 3 servers: Browser :8101 | Audit :8102 | DigiLocker :8103")
 
 
 # ---------------------------------------------------------------------------
@@ -251,3 +251,4 @@ def _log_to_db(user_id, phone, message, result, message_type):
 # ---------------------------------------------------------------------------
 # CHAT -- main entry point for the web app
 # ---------------------------------------------------------------------------
+

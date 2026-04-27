@@ -38,10 +38,21 @@ load_dotenv()
 # -- API Keys -------------------------------------------------
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
+SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
 
 # -- Base URLs ------------------------------------------------
 GROQ_URL   = "https://api.groq.com/openai/v1"
 NVIDIA_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
+SARVAM_URL = "https://api.sarvam.ai"
+
+def _sarvam_ok() -> bool:
+    return bool(SARVAM_API_KEY and SARVAM_API_KEY not in ("", "your_sarvam_key_here"))
+
+async def _sarvam_call(messages: list, temperature: float, max_tokens: int) -> str:
+    if not _sarvam_ok():
+        return ""
+    # Sarvam uses OpenAI-compatible chat endpoint
+    return await _openai_compat(f"{SARVAM_URL}", SARVAM_API_KEY, "sarvam-1", messages, temperature, max_tokens)
 
 # -- Groq Models ----------------------------------------------
 GROQ_MODEL_FAST   = os.getenv("GROQ_MODEL_FAST",   "llama-3.1-8b-instant")
@@ -120,36 +131,61 @@ async def _nim_call(model: str, messages: list, temperature: float, max_tokens: 
 # -- Public LLM Functions -------------------------------------
 
 async def chat_intent(messages: list, temperature: float = 0.1, max_tokens: int = 256) -> str:
-    """Fast intent classification -- Groq llama-3.1-8b-instant (~50ms)."""
+    """Fast intent classification -- Sarvam/Groq llama-3.1-8b-instant."""
+    result = await _sarvam_call(messages, temperature, max_tokens)
+    if result: return result
     result = await _groq_call(GROQ_MODEL_FAST, messages, temperature, max_tokens)
-    if result:
-        return result
+    if result: return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
 async def chat_conversational(messages: list, temperature: float = 0.6, max_tokens: int = 768) -> str:
-    """Warm multilingual conversation -- Groq llama-3.3-70b-versatile."""
+    """Warm multilingual conversation -- Sarvam primary."""
+    result = await _sarvam_call(messages, temperature, max_tokens)
+    if result: return result
     result = await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
-    if result:
-        return result
+    if result: return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
 async def chat_extraction(messages: list, temperature: float = 0.1, max_tokens: int = 512) -> str:
-    """Structured extraction from user messages -- Groq 70B."""
+    """Structured extraction -- Sarvam/Groq 70B."""
+    result = await _sarvam_call(messages, temperature, max_tokens)
+    if result: return result
     result = await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
-    if result:
-        return result
+    if result: return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
 async def chat_translation(text: str, source_lang: str, target_lang: str) -> str:
     """
-    Translate text between Indian languages using Groq 70B.
+    Translate text using Sarvam's specialized translation API.
     Supports: hi, en, mr, ta, te, bn, gu, kn, ml, pa, ur
     """
     if source_lang == target_lang:
         return text
+
+    # 1. Try Sarvam specialized translation
+    if _sarvam_ok():
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{SARVAM_URL}/translate",
+                    headers={"Authorization": f"Bearer {SARVAM_API_KEY}"},
+                    json={
+                        "input": text,
+                        "source_language_code": f"{source_lang}-IN" if source_lang != "en" else "en-IN",
+                        "target_language_code": f"{target_lang}-IN" if target_lang != "en" else "en-IN",
+                        "speaker_gender": "Female",
+                        "mode": "formal"
+                    }
+                )
+                if response.status_code == 200:
+                    return response.json().get("translated_text", text)
+        except Exception as e:
+            print(f"[Translation] Sarvam failed: {e}")
+
+    # 2. Fallback to LLM-based translation (Groq/NVIDIA)
     lang_names = {
         "hi": "Hindi", "en": "English", "mr": "Marathi", "ta": "Tamil",
         "te": "Telugu", "bn": "Bengali", "gu": "Gujarati", "kn": "Kannada",
@@ -181,10 +217,11 @@ async def chat(
     max_tokens: int = 1024,
     use_web_search: bool = False,
 ) -> str:
-    """General-purpose chat -- Groq primary, NVIDIA fallback."""
+    """General-purpose chat -- Sarvam primary, then Groq/NVIDIA."""
+    result = await _sarvam_call(messages, temperature, max_tokens)
+    if result: return result
     result = await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
-    if result:
-        return result
+    if result: return result
     return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
 
 
@@ -210,12 +247,12 @@ async def detect_intent(text: str) -> str:
         },
         {"role": "user", "content": text},
     ]
+    result = await _sarvam_call(messages, 0.0, 32)
+    if result: return result.strip().lower()
     result = await _groq_call(GROQ_MODEL_FAST, messages, 0.0, 32)
-    if result:
-        return result.strip().lower()
+    if result: return result.strip().lower()
     result = await _nim_call(NIM_MODEL_GENERAL, messages, 0.0, 32)
-    if result:
-        return result.strip().lower()
+    if result: return result.strip().lower()
     return _intent_keyword_fallback(text)
 
 
@@ -271,6 +308,28 @@ async def chat_vision(
         result = await _groq_call(GROQ_MODEL_VISION, messages, temperature, max_tokens)
         if result:
             return result
+    return ""
+
+
+async def transcribe_audio_sarvam(audio_path: str, language: str = "hi") -> str:
+    """
+    Transcribe audio using Sarvam Saaras (Best for Indian languages).
+    """
+    if not _sarvam_ok():
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            with open(audio_path, "rb") as f:
+                response = await client.post(
+                    f"{SARVAM_URL}/speech-to-text-translate",
+                    headers={"Authorization": f"Bearer {SARVAM_API_KEY}"},
+                    files={"file": f},
+                    data={"model": "saaras-v1", "language_code": language},
+                )
+            if response.status_code == 200:
+                return response.json().get("transcript", "")
+    except Exception as e:
+        print(f"[ASR] Sarvam failed: {e}")
     return ""
 
 

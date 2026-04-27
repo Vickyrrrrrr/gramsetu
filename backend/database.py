@@ -15,7 +15,14 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from supabase import create_client, Client
+try:
+    from supabase import create_client, Client
+    _HAS_SUPABASE = True
+except ImportError:
+    _HAS_SUPABASE = False
+    create_client = None
+    Client = None
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -38,6 +45,14 @@ def _get_client() -> Client:
     return _client
 
 
+def _check_supabase():
+    """Raise RuntimeError if Supabase is not available."""
+    if not _HAS_SUPABASE:
+        raise RuntimeError("[DB] Supabase not installed")
+    if not _SUPABASE_URL or not _SUPABASE_KEY:
+        raise RuntimeError("[DB] SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY not set")
+
+
 def get_connection():
     """Legacy shim — returns the Supabase client instead of a sqlite3 connection."""
     return _get_client()
@@ -49,6 +64,9 @@ def init_db():
     Tables are created via SQL migrations in Supabase dashboard — not here.
     Run the SQL in supabase_migrations.sql to create all tables.
     """
+    if not _HAS_SUPABASE:
+        print("[DB] Supabase not installed - running in prototype mode (no DB)")
+        return
     try:
         client = _get_client()
         client.table("conversations").select("id").limit(1).execute()
@@ -76,6 +94,7 @@ def log_conversation(
 ):
     """Log a single message exchange to the conversations table."""
     try:
+        _check_supabase()
         _get_client().table("conversations").insert({
             "user_id": user_id,
             "user_phone": user_phone,
@@ -87,6 +106,8 @@ def log_conversation(
             "bot_response": bot_response,
             "active_agent": active_agent,
         }).execute()
+    except RuntimeError:
+        return  # Supabase not available
     except Exception as e:
         print(f"[DB] log_conversation error: {e}")
 
@@ -114,6 +135,7 @@ def save_conversation(
 def get_recent_conversations(limit: int = 50) -> list:
     """Get the most recent conversations (for dashboard live feed)."""
     try:
+        _check_supabase()
         res = (
             _get_client()
             .table("conversations")
@@ -123,6 +145,8 @@ def get_recent_conversations(limit: int = 50) -> list:
             .execute()
         )
         return res.data or []
+    except RuntimeError:
+        return []
     except Exception as e:
         print(f"[DB] get_recent_conversations error: {e}")
         return []
@@ -143,6 +167,7 @@ def log_audit(
 ):
     """Log an agent action to the audit trail (immutable)."""
     try:
+        _check_supabase()
         _get_client().table("audit_logs").insert({
             "user_id": user_id,
             "agent_name": agent_name,
@@ -152,6 +177,8 @@ def log_audit(
             "confidence_score": confidence_score,
             "status": status,
         }).execute()
+    except RuntimeError:
+        return
     except Exception as e:
         print(f"[DB] log_audit error: {e}")
 

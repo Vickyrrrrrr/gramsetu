@@ -63,7 +63,11 @@ SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
 _SARVAM_OK = bool(SARVAM_API_KEY and SARVAM_API_KEY not in ("", "your_sarvam_key_here"))
 
 # ── WebSocket Clients (shared with graph.py) ─────────────────
-_browser_ws_clients: dict = {}
+from backend.agents.graph import _browser_ws_clients
+
+# ── Cancellation Signals ─────────────────────────────────────
+# session_id -> bool (if true, agent should abort)
+_cancel_signals: dict = {}
 
 # ── Screenshot Cache ─────────────────────────────────────
 _screenshot_cache: dict = {}
@@ -128,10 +132,11 @@ async def _analyze_with_nim_vision(
 {remaining_items}
 
 **Instructions:**
-1. Look carefully at the screenshot
-2. Identify which field from the list is visible on screen
-3. Check if there is an OTP/verification field
-4. Check if the submit button is visible
+1. Look carefully at the screenshot for ANY blocking popups, overlays, or cookie consent banners (e.g., "Accept All Cookies", "Close", "OK", "आईये", "सहमति दें").
+2. **PRIORITY 1**: If a popup is blocking the form, set action="click_button" and label to the button text that closes it.
+3. **PRIORITY 2**: If no popup, identify which field from the list is visible on screen.
+4. Check if there is an OTP/verification field.
+5. Check if the submit button is visible.
 
 Respond with ONLY valid JSON (no markdown):
 {{
@@ -147,6 +152,7 @@ Respond with ONLY valid JSON (no markdown):
   "reasoning": "brief explanation"
 }}
 
+If a blocking popup is seen, prioritize clicking its close/accept button.
 If no more fields need filling and form appears complete, set action="done".
 If OTP field is visible, set otp_detected=true and otp_field_position to clickable center.
 If nothing visible to fill, try scroll_down."""
@@ -347,17 +353,9 @@ async def analyze_portal_screenshot(
 ) -> FormFillAction:
     """
     Analyze a portal screenshot and decide the next action.
-    Tries NIM Vision → Sarvam Vision → Groq Vision → fallback.
+    Priority: Sarvam Vision → NVIDIA NIM → Groq Vision → fallback.
     """
-    # 1. NVIDIA NIM Vision (primary, best quality)
-    if NVIDIA_API_KEY and NVIDIA_API_KEY != "nvapi-your-key-here":
-        result = await _analyze_with_nim_vision(
-            screenshot_b64, form_data, form_type, language, page_context
-        )
-        if not result.error:
-            return result
-
-    # 2. Sarvam Vision (India-trained, good for Indic)
+    # 1. Sarvam Vision (India-trained, excellent for Indic portals)
     if _SARVAM_OK:
         result = await _analyze_with_sarvam_vision(
             screenshot_b64, form_data, form_type, language, page_context
@@ -365,7 +363,15 @@ async def analyze_portal_screenshot(
         if not result.error or result.error == "sarvam_failed":
             return result
 
-    # 3. Groq Vision (free fallback)
+    # 2. NVIDIA NIM Vision (Fallback, high quality)
+    if NVIDIA_API_KEY and NVIDIA_API_KEY != "nvapi-your-key-here":
+        result = await _analyze_with_nim_vision(
+            screenshot_b64, form_data, form_type, language, page_context
+        )
+        if not result.error:
+            return result
+
+    # 3. Groq Vision (Secondary fallback)
     if GROQ_API_KEY:
         result = await _analyze_with_groq_vision(
             screenshot_b64, form_data, form_type, language
@@ -506,8 +512,13 @@ async def _playwright_fill(
                 page = await context.new_page()
                 page.on("dialog", lambda d: _aio.ensure_future(d.dismiss()))
 
-                await page.goto(portal_url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(2000)
+                try:
+                    await page.goto(portal_url, wait_until="commit", timeout=60000)
+                    await page.wait_for_timeout(3000) # Give JS a moment to render
+                except Exception as e:
+                    print(f"[FormFill] Navigation failed to {portal_url}: {e}")
+                    # Fallback retry with longer timeout
+                    await page.goto(portal_url, wait_until="load", timeout=90000)
 
                 # Take initial screenshot
                 try:
@@ -527,6 +538,12 @@ async def _playwright_fill(
 
                 while steps_taken < max_steps:
                     steps_taken += 1
+
+                    # ── Check for Cancellation Signal ─────────
+                    if _cancel_signals.get(session_id):
+                        print(f"[FormFill] Session {session_id[:8]}... ABORTED by user.")
+                        _cancel_signals.pop(session_id, None)
+                        break
 
                     # ── Analyze with VLM ──────────────────
                     try:
@@ -598,8 +615,15 @@ async def _playwright_fill(
                                 pass
 
                     elif action.action == "click_button":
-                        button_labels = ["Submit", "जमा करें", "Apply", "आवेदन करें",
-                                       "Register", "Proceed", "Next", "Continue"]
+                        # Priority labels including popups
+                        button_labels = [
+                            "Accept All Cookies", "Accept", "OK", "Close", "Dismiss", "X", "Close Window",
+                            "सहमति दें", "ठीक है", "बंद करें", "हटाएं",
+                            "Submit", "जमा करें", "Apply", "आवेदन करें",
+                            "Register", "Proceed", "Next", "Continue"
+                        ]
+                        if action.label:
+                            button_labels.insert(0, action.label)
                         clicked = False
                         for bl in button_labels:
                             try:

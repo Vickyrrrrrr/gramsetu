@@ -3,22 +3,17 @@
 security.py — Security Middleware for GramSetu v3
 ============================================================
 Provides:
-  - Twilio webhook signature validation
   - Rate limiting (in-memory, no Redis needed)
   - PII encryption/decryption for checkpoint DB
   - Input sanitization
+  - Human review guardrails
 """
 
 import os
 import re
 import time
-import hmac
-import hashlib
-import base64
 from typing import Optional
-from functools import wraps
 from collections import defaultdict
-from urllib.parse import urlencode
 from datetime import datetime, timezone
 
 from cryptography.fernet import Fernet
@@ -35,48 +30,6 @@ if not _ENC_KEY:
     os.environ["PII_ENCRYPTION_KEY"] = _ENC_KEY
 
 _fernet = Fernet(_ENC_KEY.encode() if isinstance(_ENC_KEY, str) else _ENC_KEY)
-
-
-# ============================================================
-# 1. Twilio Webhook Signature Validation
-# ============================================================
-
-def validate_twilio_signature(url: str, params: dict, signature: str) -> bool:
-    """
-    Validate that a webhook request actually came from Twilio.
-    Uses HMAC-SHA1 as per Twilio docs.
-
-    Args:
-        url:       The full webhook URL (https://your-domain.com/webhook)
-        params:    The POST body parameters as a dict
-        signature: The X-Twilio-Signature header value
-
-    Returns:
-        True if signature is valid (request is from Twilio)
-    """
-    auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
-    if not auth_token:
-        # No auth token configured — skip validation (dev mode)
-        return True
-
-    # Allow disabling validation for local dev/ngrok testing
-    if os.getenv("TWILIO_VALIDATION", "true").lower() in ("false", "0", "no", "skip"):
-        return True
-
-    # Sort params and append to URL
-    sorted_params = sorted(params.items())
-    data = url + "".join(f"{k}{v}" for k, v in sorted_params)
-
-    # HMAC-SHA1
-    computed = base64.b64encode(
-        hmac.new(
-            auth_token.encode("utf-8"),
-            data.encode("utf-8"),
-            hashlib.sha1,
-        ).digest()
-    ).decode("utf-8")
-
-    return hmac.compare_digest(computed, signature)
 
 
 # ============================================================
@@ -116,8 +69,7 @@ class RateLimiter:
         return max(0, self.max_requests - len(recent))
 
 
-# Global rate limiters
-webhook_limiter = RateLimiter(max_requests=30, window_seconds=60)   # 30 msgs/min per user
+# Global rate limiter
 api_limiter = RateLimiter(max_requests=60, window_seconds=60)       # 60 req/min per IP
 
 

@@ -1,20 +1,19 @@
 {
     "name": "gramsetu",
     "version": "1.0.0",
-    "description": "GramSetu - Python-first multi-agent system for government form automation",
-    "main": "whatsapp_bot/main.py",
+    "description": "GramSetu - AI-powered government form assistant for rural India",
+    "main": "server.py",
     "scripts": {
-        "start": "python -m whatsapp_bot.main",
-        "dashboard": "streamlit run dashboard/app.py",
+        "start": "python server.py",
+        "dev": "python server.py",
         "test": "python -m pytest tests/test_gramsetu.py -v"
     },
     "keywords": [
         "gramsetu",
         "government",
         "forms",
-        "multi-agent",
-        "mcp",
-        "whatsapp",
+        "ai-agent",
+        "langgraph",
         "india"
     ],
     "author": "GramSetu Team",
