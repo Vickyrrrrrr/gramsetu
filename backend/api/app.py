@@ -144,12 +144,12 @@ async def startup():
     print(f"  Fallback:     {groq_status} ({GROQ_MODEL_MAIN})")
     print(f"  Vision:       {nvidia_status}")
     print(f"  STT/TTS:      {sarvam_status} (saaras:v3 + bulbul:v3)")
-    print(f"  MCP:         4 servers (Browser + Audit + DigiLocker + WhatsApp)")
+    print("  MCP:         4 servers (Browser + Audit + DigiLocker + WhatsApp)")
     print("-" * 60)
     print(f"  API Docs:    http://localhost:{port}/docs")
-    print(f"  Chat:        POST /api/chat")
-    print(f"  Voice:       POST /api/voice")
-    print(f"  Realtime:    WS  /api/voice/realtime")
+    print("  Chat:        POST /api/chat")
+    print("  Voice:       POST /api/voice")
+    print("  Realtime:    WS  /api/voice/realtime")
     print("=" * 60 + "\n")
 
     # Start MCP servers on startup

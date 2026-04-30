@@ -17,9 +17,7 @@ Compliant with DPDP Act 2023 and Aadhaar Act 2016.
 import re
 import hashlib
 import time
-from datetime import datetime, timezone
 from collections import defaultdict
-from typing import Optional
 
 
 # ── In-memory stores (production: Redis) ────────────────────

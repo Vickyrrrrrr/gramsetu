@@ -6,7 +6,6 @@ from user-provided context OR calls the DigiLocker MCP tool
 for registered user data.
 """
 
-import os
 import json
 import re
 

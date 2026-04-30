@@ -17,8 +17,6 @@ All tools operate on Playwright browser instances managed per session.
 import os
 import asyncio
 import base64
-import json
-from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu Browser Server")
@@ -287,7 +285,6 @@ async def get_page_state(session_id: str) -> dict:
                 name = await inp.get_attribute("name")
                 field_type = await inp.get_attribute("type")
                 placeholder = await inp.get_attribute("placeholder")
-                label = name or placeholder or ""
                 fields.append({"name": name, "type": field_type, "placeholder": placeholder})
             except Exception:
                 pass

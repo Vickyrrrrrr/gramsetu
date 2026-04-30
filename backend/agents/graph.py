@@ -27,16 +27,14 @@ import os
 import json
 import time
 import uuid
-import asyncio
-from typing import Any, Optional
-from datetime import datetime, timezone
+from typing import Optional
 
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-from backend.agents.schema import GramSetuState, GraphStatus, SCHEMA_REGISTRY
+from backend.agents.schema import GramSetuState, GraphStatus
 
 load_dotenv()
 
@@ -479,9 +477,9 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
         missing_labels = [f.replace("_", " ").title() for f in missing[:6]]
         state["missing_fields"] = missing
         state["response"] = await _localized(
-            f"📝 अभी ये जानकारी चाहिए:\n" + "\n".join(f"  • {l}" for l in missing_labels[:5]) +
+            "📝 अभी ये जानकारी चाहिए:\n" + "\n".join(f"  • {label}" for label in missing_labels[:5]) +
             "\n\nकृपया ये जानकारी भेजें।",
-            f"📝 I need this info:\n" + "\n".join(f"  • {l}" for l in missing_labels[:5]) +
+            "📝 I need this info:\n" + "\n".join(f"  • {label}" for label in missing_labels[:5]) +
             "\n\nPlease share these details.",
             lang,
         )
@@ -546,7 +544,7 @@ async def validate_confirm_node(state: GramSetuState) -> GramSetuState:
     state["validation_errors"] = errors
 
     # Anti-fake check
-    from backend.identity_verifier import detect_fake_pattern, check_duplicate_identity
+    from backend.identity_verifier import detect_fake_pattern
     aadhaar = form_data.get("aadhaar_number", "")
     if aadhaar:
         is_fake, fake_reason = detect_fake_pattern(str(aadhaar))
@@ -657,8 +655,8 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
 
         await _broadcast_progress(
             session_id, _PROGRESS_STEPS[7], 1.0,
-            [{"id": i, "label": l, "done": True}
-             for i, l in {1:"",2:"",3:"",4:"",5:"",6:"",7:"",8:""}.items()],
+            [{"id": idx, "label": lbl, "done": True}
+             for idx, lbl in {1:"",2:"",3:"",4:"",5:"",6:"",7:"",8:""}.items()],
             user_id,
         )
         return state
@@ -856,9 +854,9 @@ async def _process(compiled, user_id, user_phone, message, message_type,
                     await compiled.aupdate_state(config, result, as_node="fill_form")
                     return _format_result(result, session_id)
                 existing_state["response"] = (
-                    f"⚠️ OTP में सिर्फ अंक होने चाहिए (4-8 अंक)। जैसे: *123456*"
+                    "⚠️ OTP में सिर्फ अंक होने चाहिए (4-8 अंक)। जैसे: *123456*"
                     if lang == "hi" else
-                    f"⚠️ OTP must be 4-8 digits, e.g. *123456*"
+                    "⚠️ OTP must be 4-8 digits, e.g. *123456*"
                 )
                 return _format_result(existing_state, session_id)
 

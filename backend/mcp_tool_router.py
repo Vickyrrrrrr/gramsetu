@@ -19,9 +19,8 @@ Pattern:
   → Done
 """
 
-import json
 import inspect
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 from dataclasses import dataclass, field
 
 
@@ -75,7 +74,6 @@ class MCPToolRouter:
             try:
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    import concurrent.futures
                     future = asyncio.run_coroutine_threadsafe(server.list_tools(), loop)
                     tools = future.result(timeout=5)
                 else:
@@ -196,8 +194,6 @@ def _initialize_tools(router: MCPToolRouter):
     """Register all MCP tools with the router."""
 
     # ── Browser tools ─────────────────────────────────────────
-    from backend.agents.form_fill_agent import run_form_fill_agent
-    from backend.agents.portal_registry import get_portal_info
 
     async def browser_navigate(session_id: str, url: str) -> dict:
         """Navigate the browser to a specific URL."""

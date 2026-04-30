@@ -13,7 +13,6 @@ When a user says "I'm a farmer, 65 years old":
 Falls back to a curated local database if LLM is unavailable.
 """
 
-import json
 from typing import Optional
 
 from backend.llm_client import chat, extract_json, get_active_provider
@@ -45,7 +44,6 @@ async def discover_schemes(
                         (e.g. "farmer needs agricultural loan")
     """
     # Try LLM-powered discovery first (Groq 70B with scheme knowledge)
-    from backend.llm_client import get_active_provider
     if get_active_provider() != "fallback":
         try:
             llm_result = await _llm_discover(

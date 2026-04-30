@@ -29,22 +29,17 @@ Provider Stack:
 """
 
 import os
-import io
 import json
 import time
 import asyncio
 import base64
 from typing import Optional, Literal
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from backend.agents.portal_registry import (
     get_portal_info,
     get_field_labels,
-    match_field_by_label,
-    PORTAL_URLS,
 )
-from backend.agents.schema import GramSetuState, GraphStatus
 from backend.agents.graph import _browser_ws_clients
 
 from dotenv import load_dotenv
@@ -237,7 +232,7 @@ Return JSON:
             content = result.get("response", "")
             if content:
                 return _parse_action_response(content)
-    except Exception as e:
+    except Exception:
         pass
     return FormFillAction(action="wait_for_page", error="sarvam_failed")
 
@@ -305,9 +300,12 @@ def _parse_action_response(raw: str) -> FormFillAction:
             if isinstance(parsed, dict):
                 # Map common action variations
                 act = str(parsed.get("action", "wait_for_page")).lower()
-                if act in ["fill", "type", "input"]: act = "fill_field"
-                if act in ["click", "press", "tap"]: act = "click_button"
-                if act in ["select", "choose", "dropdown"]: act = "select_option"
+                if act in ["fill", "type", "input"]:
+                    act = "fill_field"
+                if act in ["click", "press", "tap"]:
+                    act = "click_button"
+                if act in ["select", "choose", "dropdown"]:
+                    act = "select_option"
                 
                 return FormFillAction(
                     action=act,
@@ -426,7 +424,6 @@ async def _playwright_fill(
     Returns:
         FormFillResult with screenshot, otp status, fields filled
     """
-    import asyncio as _aio
     from playwright.async_api import async_playwright
 
     screenshot_dir = screenshot_dir or os.path.join(

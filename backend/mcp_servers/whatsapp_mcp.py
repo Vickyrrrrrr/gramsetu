@@ -16,7 +16,6 @@ The gateway forwards messages to /api/whatsapp/message,
 this MCP provides tools for the agent to SEND responses back.
 """
 import os
-import json
 import httpx
 from mcp.server.fastmcp import FastMCP
 
@@ -89,8 +88,6 @@ def send_voice(phone_number: str, text: str, language: str = "hi") -> dict:
         text: Text to convert to speech
         language: Language code (hi, en, ta, te, bn, mr, gu, kn, ml, pa, ur)
     """
-    clean_phone = phone_number.replace("+", "").replace(" ", "")
-
     # Generate TTS
     try:
         from lib.voice_handler import generate_voice
@@ -126,8 +123,6 @@ def send_image(phone_number: str, image_base64: str, caption: str = "") -> dict:
         image_base64: Base64-encoded JPEG/PNG image
         caption: Optional text caption for the image
     """
-    clean_phone = phone_number.replace("+", "").replace(" ", "")
-
     return {
         "sent": True,
         "phone": phone_number,

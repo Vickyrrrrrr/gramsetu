@@ -14,19 +14,14 @@ Endpoints:
   GET  /api/whatsapp/health  — Connection status
 """
 import os
-import json
-import base64
 import tempfile
-import asyncio
 from fastapi import APIRouter, Request, HTTPException, UploadFile, Form
 from fastapi.responses import JSONResponse
 
 from backend.agents.graph import process_message as v3_process_message
-from backend.agents.schema import GraphStatus
 from lib.language_utils import detect_language
 from backend.llm_client import (
     transcribe_audio_sarvam, transcribe_audio_groq,
-    chat_conversational,
 )
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp"])
@@ -171,8 +166,6 @@ async def whatsapp_image(request: Request):
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
     image_b64 = body.get("image", "")
-    phone = body.get("phone", "whatsapp-user")
-    caption = body.get("caption", "")
 
     if not image_b64:
         return JSONResponse({"response": "No image received."})

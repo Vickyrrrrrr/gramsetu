@@ -11,9 +11,7 @@ This MCP server connects to the LLM for intelligent data extraction
 instead of using hardcoded demo data.
 """
 
-import os
 import json
-from typing import Optional
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu DigiLocker Server")
@@ -197,7 +195,7 @@ Common fields to look for:
                     "confidence_scores": parsed.get("confidence_scores", {}),
                     "missing_fields": parsed.get("missing_fields", []),
                 }
-    except Exception as e:
+    except Exception:
         pass
 
     return _fallback_extract(form_type, user_text)

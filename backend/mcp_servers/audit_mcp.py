@@ -10,7 +10,6 @@ Exposes tools:
 
 import re
 import json
-import time
 from datetime import datetime, timezone
 
 from mcp.server.fastmcp import FastMCP
@@ -170,6 +169,10 @@ def record_action(
     Record an audit entry for compliance tracking.
     All PII is automatically redacted before storage.
     """
+    return _do_record_action(agent, action, input_summary, output_summary, confidence)
+
+
+def _do_record_action(agent, action, input_summary, output_summary, confidence):
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "agent": agent,
@@ -179,14 +182,14 @@ def record_action(
         "confidence": round(confidence, 4),
         "latency_ms": 0,
     }
-    _audit_log.append(entry)
-    if len(_audit_log) > 10000:
-        _audit_log[:] = _audit_log[-5000:]
-    return {"recorded": True, "total_entries": len(_audit_log)}
+    _audit_log.append(entry)  # noqa: F821
+    if len(_audit_log) > 10000:  # noqa: F821
+        _audit_log[:] = _audit_log[-5000:]  # noqa: F821
+    return {"recorded": True, "total_entries": len(_audit_log)}  # noqa: F821
 
 
 @mcp.tool()
 def get_audit_log(limit: int = 50) -> str:
     """Retrieve the most recent audit log entries (PII-redacted)."""
-    entries = _audit_log[-limit:]
+    entries = _audit_log[-limit:]  # noqa: F821
     return json.dumps(entries, indent=2, ensure_ascii=False)

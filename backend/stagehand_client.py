@@ -16,7 +16,6 @@ Falls back gracefully if Stagehand errors → caller uses legacy Playwright.
 import os
 import base64
 import asyncio
-from typing import Optional
 
 from dotenv import load_dotenv
 

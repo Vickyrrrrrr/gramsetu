@@ -8,7 +8,6 @@ import json
 import asyncio
 import websockets
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from backend.core.config import get_settings
 
 router = APIRouter(tags=["voice-realtime"])
 
