@@ -208,7 +208,12 @@ export default function AppPage() {
   ])
   const [mcpWarn, setMcpWarn] = useState('')
   const [recording, setRecording] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
   const [liveTxt, setLiveTxt] = useState('')
+  const [errorBanner, setErrorBanner] = useState('')
+  const [isOnline, setIsOnline] = useState(true)
+  const [lastFailedMsg, setLastFailedMsg] = useState<string | null>(null)
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const [schemes, setSchemes] = useState<SchemeCard[]>([])
   const [browserFrame, setBrowserFrame] = useState<string | null>(null)
   const [browserStep, setBrowserStep] = useState('')
@@ -237,6 +242,25 @@ export default function AppPage() {
     if (typeof window === 'undefined') return
     localStorage.setItem('gs_s', JSON.stringify({ uid: userId, phone, lang }))
   }, [userId, phone, lang])
+
+  /* ── online status ─────────────────── */
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true)
+    const goOffline = () => setIsOnline(false)
+    window.addEventListener('online', goOnline)
+    window.addEventListener('offline', goOffline)
+    return () => {
+      window.removeEventListener('online', goOnline)
+      window.removeEventListener('offline', goOffline)
+    }
+  }, [])
+
+  /* ── error auto-dismiss ────────────── */
+  useEffect(() => {
+    if (!errorBanner) return
+    const t = setTimeout(() => setErrorBanner(''), 6000)
+    return () => clearTimeout(t)
+  }, [errorBanner])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -327,16 +351,28 @@ export default function AppPage() {
   }
 
   const callBackend = useCallback(async (text: string, phoneOverride?: string) => {
-    setStatus('loading')
+    if (!isOnline) { setErrorBanner('No internet connection'); return }
+    setStatus('loading'); setLastFailedMsg(null)
     try {
       const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, user_id: userId, phone: phoneOverride || phone || 'anonymous', language: lang }) })
-      if (!r.ok) throw new Error('')
+      if (!r.ok) throw new Error(`${r.status}`)
       const d = await r.json()
       if (d.language && LANG_MAP[d.language]) setLang(d.language)
       addMsg('assistant', d.response || 'Something went wrong.', { screenshotUrl: d.screenshot_url || null, receiptUrl: d.receipt_url || null })
-    } catch { addMsg('system', 'Backend unreachable. Is the server running?') }
+    } catch {
+      setLastFailedMsg(text)
+      addMsg('system', '⚠️ Could not reach server. Click here to retry →')
+    }
     finally { setStatus('idle'); setTimeout(() => inputRef.current?.focus(), 100) }
-  }, [phone, userId, lang, addMsg])
+  }, [phone, userId, lang, addMsg, isOnline])
+
+  const retryLast = useCallback(() => {
+    if (!lastFailedMsg) return
+    const toResend = lastFailedMsg
+    setLastFailedMsg(null)
+    setMessages(prev => prev.filter(m => !m.text.includes('Could not reach server')))
+    callBackend(toResend)
+  }, [lastFailedMsg, callBackend])
 
   const send = useCallback((override?: string) => {
     const msg = (override ?? input).trim()
@@ -360,7 +396,8 @@ export default function AppPage() {
     if (mediaRecRef.current && mediaRecRef.current.state !== 'inactive') {
       mediaRecRef.current.stop()
     }
-    setRecording(false)
+    if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null }
+    setRecording(false); setRecordingTime(0)
   }, [])
 
   const startVoice = useCallback(async () => {
@@ -371,27 +408,38 @@ export default function AppPage() {
       mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
       mr.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop())
+        if (recordingTimerRef.current) { clearInterval(recordingTimerRef.current); recordingTimerRef.current = null }
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        if (blob.size < 100) { setErrorBanner('Recording too short — please speak clearly'); setRecording(false); setLiveTxt(''); setRecordingTime(0); return }
         const fd = new FormData()
         fd.append('audio', blob, 'recording.webm')
         try {
+          setLiveTxt('Transcribing...')
           const res = await fetch('/api/voice', { method: 'POST', body: fd })
           if (res.ok) {
             const data = await res.json()
             if (data.text) {
               setInput(data.text)
               send(data.text)
+            } else {
+              setErrorBanner('Could not understand audio — try typing instead')
             }
+          } else {
+            setErrorBanner('Voice service unavailable — try typing')
           }
-        } catch { /* voice unavailable */ }
-        setRecording(false)
-        setLiveTxt('')
+        } catch { setErrorBanner('Voice upload failed — check connection') }
+        setRecording(false); setLiveTxt(''); setRecordingTime(0)
       }
       mr.start()
       mediaRecRef.current = mr
-      setRecording(true)
-    } catch { setRecording(false) }
-  }, [send])
+      setRecording(true); setRecordingTime(0)
+      const startTime = Date.now()
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(Math.round((Date.now() - startTime) / 1000))
+        if (Date.now() - startTime > 30000) stopVoice() // 30s max
+      }, 1000)
+    } catch { setErrorBanner('Microphone access denied — check browser permissions') }
+  }, [send, stopVoice])
 
   /* ── render ──────────────────────── */
   const isFirst = messages.length <= 1
@@ -443,7 +491,13 @@ export default function AppPage() {
       <div ref={listRef} className="flex-1 overflow-y-auto px-3 py-4 space-y-3">
         {messages.map(m => m.role === 'system' ? (
           <div key={m.id} className="flex justify-center">
-            <div className="text-[11px] px-2.5 py-1 rounded-full" style={{ background: '#f5f0e8', color: '#8c7851' }}>{m.text}</div>
+            {m.text.includes('retry') ? (
+              <button onClick={retryLast} className="text-[11px] px-2.5 py-1 rounded-full cursor-pointer hover:opacity-80" style={{ background: '#fee2e2', color: '#dc2626' }}>
+                {m.text.replace('→', '')} ↻
+              </button>
+            ) : (
+              <div className="text-[11px] px-2.5 py-1 rounded-full" style={{ background: '#f5f0e8', color: '#8c7851' }}>{m.text}</div>
+            )}
           </div>
         ) : (
           <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -514,6 +568,21 @@ export default function AppPage() {
       {/* MCP WARNING */}
       {mcpWarn && <div className="px-3 py-1 text-[11px] text-amber-700 bg-amber-50 border-t border-amber-100">{mcpWarn}</div>}
 
+      {/* ERROR BANNER */}
+      {errorBanner && (
+        <div className="px-3 py-1.5 text-xs text-red-700 bg-red-50 border-t border-red-100 flex items-center justify-between">
+          <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-red-500" /> {errorBanner}</span>
+          <button onClick={() => setErrorBanner('')} className="opacity-50 hover:opacity-100">×</button>
+        </div>
+      )}
+
+      {/* OFFLINE BANNER */}
+      {!isOnline && (
+        <div className="px-3 py-1.5 text-xs text-orange-700 bg-orange-50 border-t border-orange-100 flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> You're offline — messages will be sent when reconnected
+        </div>
+      )}
+
       {/* LIVE TRANSCRIPT */}
       {liveTxt && (
         <div className="px-3 py-1.5 text-xs text-blue-700 bg-blue-50 border-t border-blue-100 flex items-center gap-1.5">
@@ -524,7 +593,7 @@ export default function AppPage() {
       {/* RECORDING INDICATOR */}
       {recording && (
         <div className="px-3 py-1.5 text-xs text-red-700 bg-red-50 border-t border-red-100 flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Listening…
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Recording {recordingTime}s · tap mic to stop {recordingTime >= 28 ? '(auto-stop soon)' : ''}
         </div>
       )}
 

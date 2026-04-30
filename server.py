@@ -40,7 +40,9 @@ _impact: ImpactStats = {
 }
 
 app = FastAPI(title="GramSetu API", version="1.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# ── CORS: restrict to known origins (not wildcard) ──────
+ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,https://gramsetu.vercel.app").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["GET","POST"], allow_headers=["*"])
 
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -97,7 +99,7 @@ async def _process(user_id: str, phone: str, message: str, message_type: str = "
 async def chat_api(request: Request):
     client_ip = request.client.host if request.client else "unknown"
     if not api_limiter.is_allowed(client_ip):
-        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
     try:
         body = await request.json()
     except Exception:
@@ -133,6 +135,14 @@ async def stop_browser(request: Request):
 # ── Voice API ───────────────────────────────────
 @app.post("/api/voice")
 async def voice_input(request: Request):
+    # File size limit: 5MB for voice uploads
+    content_length = request.headers.get("content-length", "0")
+    if int(content_length) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Audio file too large (max 5MB)")
+    
+    client_ip = request.client.host if request.client else "unknown"
+    if not api_limiter.is_allowed(client_ip):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
     content_type = request.headers.get("content-type", "")
     lang = "hi"
     if "multipart/form-data" in content_type:
