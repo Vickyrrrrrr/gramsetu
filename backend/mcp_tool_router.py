@@ -19,7 +19,9 @@ Pattern:
   → Done
 """
 
+import asyncio
 import inspect
+import json
 from typing import Callable, Optional
 from dataclasses import dataclass, field
 
@@ -29,24 +31,13 @@ class MCPTool:
     """A single tool registered from an MCP server."""
     name: str
     description: str
-    server: str                 # e.g. "browser", "audit", "digilocker"
-    func: Callable              # The async function to call
+    server: str
+    func: Optional[Callable] = None     # direct function (register_direct)
+    is_fastmcp: bool = False            # True if using FastMCP's call_tool
     input_schema: dict = field(default_factory=dict)
     is_async: bool = True
 
-    def to_llm_schema(self) -> dict:
-        """Convert to OpenAI-compatible function schema for the LLM."""
-        return {
-            "type": "function",
-            "function": {
-                "name": f"{self.server}__{self.name}",
-                "description": self.description,
-                "parameters": self.input_schema,
-            },
-        }
-
     def to_prompt(self) -> str:
-        """Human-readable description for non-function-calling LLMs."""
         params = ", ".join(
             f"{k}: {v.get('type', 'string')}" 
             for k, v in self.input_schema.get("properties", {}).items()
@@ -63,27 +54,48 @@ class MCPToolRouter:
 
     def __init__(self):
         self._tools: dict[str, MCPTool] = {}
-        self._servers: dict[str, object] = {}
+        self._servers: dict[str, object] = {}           # FastMCP server instances
+        self._direct_funcs: dict[str, Callable] = {}    # For register_direct
 
     def register_server(self, name: str, server: object):
-        """Register an MCP server instance and all its tools."""
+        """Register a FastMCP server — reads @mcp.tool() decorated functions."""
         self._servers[name] = server
+        tools = []
 
-        if hasattr(server, "list_tools"):
-            import asyncio
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    future = asyncio.run_coroutine_threadsafe(server.list_tools(), loop)
-                    tools = future.result(timeout=5)
-                else:
-                    tools = asyncio.run(server.list_tools())
-            except Exception:
-                tools = []
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're inside an async context — create a new loop on another thread
+                import concurrent.futures
+                def _sync_list():
+                    inner_loop = asyncio.new_event_loop()
+                    try:
+                        return inner_loop.run_until_complete(server.list_tools())
+                    finally:
+                        inner_loop.close()
 
-            if isinstance(tools, list):
-                for tool in tools:
-                    self._register_tool(name, tool)
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    tools = executor.submit(_sync_list).result(timeout=10)
+            else:
+                tools = loop.run_until_complete(server.list_tools())
+        except RuntimeError:
+            # No event loop exists yet
+            tools = asyncio.run(server.list_tools())
+        except Exception as e:
+            print(f"[MCP Router] list_tools failed for {name}: {e}")
+            tools = []
+
+        if isinstance(tools, list):
+            for tool in tools:
+                tool_name = getattr(tool, "name", "")
+                tool_desc = getattr(tool, "description", "")
+                tool_schema = getattr(tool, "inputSchema", {}) or {}
+                key = f"{name}__{tool_name}"
+                self._tools[key] = MCPTool(
+                    name=tool_name, description=tool_desc, server=name,
+                    is_fastmcp=True, input_schema=tool_schema,
+                )
+            print(f"[MCP Router] {name}: {len(tools)} tools from @mcp.tool() decorators")
 
     def _register_tool(self, server_name: str, tool_info: dict):
         """Register a single tool from structured info."""
@@ -101,10 +113,11 @@ class MCPToolRouter:
 
     def register_direct(self, server: str, name: str, description: str,
                         func: Callable, input_schema: dict = None):
-        """Register a tool directly by function (bypass list_tools)."""
+        """Register a tool directly by function (kept for compatibility)."""
         if input_schema is None:
             input_schema = self._infer_schema(func)
         key = f"{server}__{name}"
+        self._direct_funcs[key] = func
         self._tools[key] = MCPTool(
             name=name, description=description,
             server=server, func=func,
@@ -157,23 +170,61 @@ class MCPToolRouter:
         return self._tools.get(f"{server}__{name}")
 
     async def execute(self, server: str, name: str, **kwargs) -> dict:
-        """Execute a tool by server and name."""
+        """Execute a tool — uses FastMCP call_tool for @mcp.tool() functions."""
         tool = self.get_tool(server, name)
         if not tool:
             return {"error": f"Tool not found: {server}.{name}"}
 
         try:
-            if hasattr(tool.func, "__self__"):
+            if tool.is_fastmcp and server in self._servers:
+                result = await self._servers[server].call_tool(name, kwargs)
+                # FastMCP returns (list/tuple of TextContent, optional structured content dict)
+                blocks = []
+                structured = None
+
+                def _scan(item):
+                    nonlocal structured
+                    if isinstance(item, (list, tuple)):
+                        for sub in item:
+                            _scan(sub)
+                    elif isinstance(item, dict):
+                        # Try to determine if this is a tool result dict
+                        if structured is None or 'found' in item or 'valid' in item or 'sent' in item or 'configured' in item:
+                            structured = item
+                        # It might be a {'result': '...'} wrapper
+                        elif 'result' in item and len(item) == 1:
+                            structured = item
+                    elif hasattr(item, 'text'):
+                        blocks.append(item)
+
+                _scan(result)
+
+                # Return structured content if available (better than parsing text blocks)
+                if structured:
+                    if 'result' in structured and len(structured) == 1:
+                        inner = structured['result']
+                        return inner if isinstance(inner, dict) else {"result": inner}
+                    return structured
+
+                # Parse text content blocks as last resort
+                for block in blocks:
+                    text = getattr(block, 'text', None)
+                    if text and isinstance(text, str):
+                        try:
+                            parsed = json.loads(text)
+                            return parsed if isinstance(parsed, dict) else {"result": parsed}
+                        except (json.JSONDecodeError, TypeError):
+                            return {"result": text}
+
+                return {"result": str(result)}
+            elif tool.func:
+                # Direct function call (legacy register_direct path)
                 result = tool.func(**kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
+                return result if isinstance(result, dict) else {"result": result}
             else:
-                result = tool.func(**kwargs)
-
-            if inspect.isawaitable(result):
-                result = await result
-
-            if isinstance(result, dict):
-                return result
-            return {"result": result}
+                return {"error": f"No execution path for {server}.{name}"}
         except Exception as e:
             return {"error": str(e), "tool": f"{server}.{name}"}
 
@@ -191,130 +242,33 @@ def get_router() -> MCPToolRouter:
 
 
 def _initialize_tools(router: MCPToolRouter):
-    """Register all MCP tools with the router."""
+    """Register all MCP tools via @mcp.tool() decorators (FastMCP)."""
 
-    # ── Browser tools ─────────────────────────────────────────
+    # ── Browser MCP (9 tools from @mcp.tool decorators) ─────
+    from backend.mcp_servers.browser_mcp import mcp as browser_mcp
+    router.register_server("browser", browser_mcp)
 
-    async def browser_navigate(session_id: str, url: str) -> dict:
-        """Navigate the browser to a specific URL."""
-        from backend.mcp_servers.browser_mcp import navigate
-        return await navigate(session_id, url)
+    # ── Audit MCP (5 tools from @mcp.tool decorators) ────────
+    from backend.mcp_servers.audit_mcp import mcp as audit_mcp
+    router.register_server("audit", audit_mcp)
 
-    async def browser_fill_form(session_id: str, form_data: dict, form_type: str) -> dict:
-        """Fill an entire form on the current portal page. Use form_type='generic' for unknown forms."""
-        from backend.mcp_servers.browser_mcp import fill_form
-        return await fill_form(session_id, form_data, form_type)
+    # ── DigiLocker MCP (5 tools from @mcp.tool decorators) ───
+    from backend.mcp_servers.digilocker_mcp import mcp as digilocker_mcp
+    router.register_server("digilocker", digilocker_mcp)
+
+    # ── WhatsApp MCP (5 tools from @mcp.tool decorators) ─────
+    from backend.mcp_servers.whatsapp_mcp import mcp as whatsapp_mcp
+    router.register_server("whatsapp", whatsapp_mcp)
+
+    # ── Legacy: direct-registered tools that chain multiple MCP calls ──
 
     async def browser_fill_field(session_id: str, field_label: str, value: str) -> dict:
-        """Fill a single form field by its visible label text."""
         from backend.mcp_servers.browser_mcp import fill_field
         return await fill_field(session_id, field_label, value)
 
-    async def browser_take_screenshot(session_id: str) -> dict:
-        """Capture the current browser page."""
-        from backend.mcp_servers.browser_mcp import take_screenshot
-        return await take_screenshot(session_id)
+    async def browser_fill_form(session_id: str, form_data: dict, form_type: str) -> dict:
+        from backend.mcp_servers.browser_mcp import fill_form
+        return await fill_form(session_id, form_data, form_type)
 
-    async def browser_click_button(session_id: str, button_label: str) -> dict:
-        """Click a button on the page by its text."""
-        from backend.mcp_servers.browser_mcp import click_button
-        return await click_button(session_id, button_label)
-
-    async def browser_detect_otp(session_id: str) -> dict:
-        """Check if the current page has an OTP verification field."""
-        from backend.mcp_servers.browser_mcp import detect_otp
-        return await detect_otp(session_id)
-
-    async def browser_navigate_and_fill(session_id: str, portal_url: str,
-                                        form_data: dict, form_type: str) -> dict:
-        """Navigate to a portal AND fill the form — complete operation."""
-        nav = await browser_navigate(session_id, portal_url)
-        if nav.get("error"):
-            return nav
-        return await browser_fill_form(session_id, form_data, form_type)
-
-    router.register_direct("browser", "navigate", "Navigate browser to a URL", browser_navigate)
-    router.register_direct("browser", "fill_form", "Fill all form fields on the current page", browser_fill_form)
-    router.register_direct("browser", "fill_field", "Fill a single form field by its label", browser_fill_field)
-    router.register_direct("browser", "take_screenshot", "Capture screenshot of the current page", browser_take_screenshot)
-    router.register_direct("browser", "click_button", "Click a button by its label text", browser_click_button)
-    router.register_direct("browser", "detect_otp", "Check if OTP field is on page", browser_detect_otp)
-    router.register_direct("browser", "navigate_and_fill", "Navigate to a portal and fill the entire form", browser_navigate_and_fill)
-
-    # ── Audit tools ────────────────────────────────────────────
-    from backend.mcp_servers.audit_mcp import validate_field as _audit_validate, _redact_text
-
-    async def audit_validate_field(field_name: str, value: str, form_type: str = "generic") -> dict:
-        """Validate a form field value. Checks Aadhaar, PAN, mobile, IFSC, PIN, DOB, email."""
-        return _audit_validate(field_name, value, form_type)
-
-    async def audit_redact_pii(text: str) -> str:
-        """Strip all PII from text before logging/displaying."""
-        return _redact_text(text)
-
-    async def audit_verify_identity(user_id: str, aadhaar: str, face_photo: str = "", phone: str = "") -> dict:
-        """Verify user identity with Aadhaar + face match."""
-        from backend.identity_verifier import verify_identity
-        return await verify_identity(user_id, aadhaar, face_photo, phone)
-
-    router.register_direct("audit", "validate_field", "Validate a form field (Aadhaar, PAN, mobile, IFSC, etc.)", audit_validate_field)
-    router.register_direct("audit", "redact_pii", "Strip PII from text", audit_redact_pii)
-    router.register_direct("audit", "verify_identity", "Verify user identity with Aadhaar + face", audit_verify_identity)
-
-    # ── DigiLocker tools ───────────────────────────────────────
-    async def digilocker_fetch_data(user_id: str) -> dict:
-        """Fetch registered user data from the secure store."""
-        from backend.mcp_servers.digilocker_mcp import fetch_user_data
-        return fetch_user_data(user_id)
-
-    async def digilocker_extract_fields(form_type: str, user_context: str) -> dict:
-        """Use LLM to extract structured form fields from user conversation text."""
-        from backend.digilocker_client import extract_with_llm
-        return await extract_with_llm(user_context, form_type)
-
-    async def digilocker_register_user(user_id: str, data: dict) -> dict:
-        """Register user data in the secure store."""
-        from backend.mcp_servers.digilocker_mcp import register_user_data
-        return register_user_data(user_id, data)
-
-    router.register_direct("digilocker", "fetch_data", "Get user's stored identity data", digilocker_fetch_data)
-    router.register_direct("digilocker", "extract_fields", "Extract structured form fields from free text", digilocker_extract_fields)
-    router.register_direct("digilocker", "register_user", "Save user's data for future use", digilocker_register_user)
-
-    # ── WhatsApp tools ─────────────────────────────────────────
-    async def whatsapp_send(phone: str, message: str) -> dict:
-        """Send a WhatsApp text message."""
-        from backend.mcp_servers.whatsapp_mcp import send_message
-        return send_message(phone, message)
-
-    async def whatsapp_send_voice(phone: str, text: str, language: str = "hi") -> dict:
-        """Send a voice note via WhatsApp using Sarvam TTS."""
-        from backend.mcp_servers.whatsapp_mcp import send_voice
-        return send_voice(phone, text, language)
-
-    async def whatsapp_get_session(phone: str) -> dict:
-        """Get WhatsApp user's current session state."""
-        from backend.mcp_servers.whatsapp_mcp import get_user_session
-        return get_user_session(phone)
-
-    async def whatsapp_trigger_form(phone: str, form_type: str, user_data: dict = None) -> dict:
-        """Initiate form filling for a WhatsApp user."""
-        from backend.mcp_servers.whatsapp_mcp import trigger_form_fill
-        return trigger_form_fill(phone, form_type, user_data or {})
-
-    async def whatsapp_check_connection() -> dict:
-        """Check WhatsApp gateway connectivity."""
-        from backend.mcp_servers.whatsapp_mcp import check_connection
-        return check_connection()
-
-    async def whatsapp_send_image(phone: str, image_b64: str, caption: str = "") -> dict:
-        """Send an image (screenshot/receipt) via WhatsApp."""
-        from backend.mcp_servers.whatsapp_mcp import send_image
-        return send_image(phone, image_b64, caption)
-
-    router.register_direct("whatsapp", "send_message", "Send WhatsApp text message", whatsapp_send)
-    router.register_direct("whatsapp", "send_voice", "Send WhatsApp voice note (TTS)", whatsapp_send_voice)
-    router.register_direct("whatsapp", "get_session", "Get WhatsApp user session state", whatsapp_get_session)
-    router.register_direct("whatsapp", "trigger_form", "Start form filling for a WhatsApp user", whatsapp_trigger_form)
-    router.register_direct("whatsapp", "check_connection", "Check WhatsApp gateway status", whatsapp_check_connection)
-    router.register_direct("whatsapp", "send_image", "Send image/document via WhatsApp", whatsapp_send_image)
+    router.register_direct("browser", "fill_field", "Fill a single form field", browser_fill_field)
+    router.register_direct("browser", "fill_form", "Fill entire form", browser_fill_form)
