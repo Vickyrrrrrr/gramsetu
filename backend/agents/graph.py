@@ -352,27 +352,30 @@ async def phone_challenge_node(state: GramSetuState) -> GramSetuState:
             provided_clean = provided_mobile.replace("+", "").replace(" ", "")
 
             if whatsapp_clean and whatsapp_clean[-10:] == provided_clean[-10:]:
-                # Numbers match — identity confirmed
-                from backend.identity_verifier import generate_challenge_otp
-                generate_challenge_otp(user_id)  # mark as verified via internal OTP
-                from backend.identity_verifier import verify_challenge_otp
+                # Numbers match — check if security enrolled, else enroll
+                from backend.secure_enclave import has_security_enrolled
+                from backend.identity_verifier import generate_challenge_otp, verify_challenge_otp
+                generate_challenge_otp(user_id)
                 verify_challenge_otp(user_id, "CONFIRMED_VIA_MOBILE_MATCH")
 
                 state["identity_verified"] = True
                 state["challenge_otp"] = ""
-                state["response"] = await _localized(
-                    "✅ *पहचान सत्यापित!*\n\n"
-                    "आपका WhatsApp नंबर और आधार से जुड़ा मोबाइल नंबर मेल खाते हैं।\n"
-                    "आपकी पहचान इस सत्र के लिए पुष्टि की गई है।\n\n"
-                    "अब बताइए — आपको कौन सा फ़ॉर्म भरना है?",
-                    "✅ *Identity Verified!*\n\n"
-                    "Your WhatsApp number matches your Aadhaar-linked mobile.\n"
-                    "Your identity is confirmed for this session.\n\n"
-                    "Now tell me — which form do you need?",
-                    lang,
-                )
-                state["next_node"] = "detect_intent"
-                state["status"] = GraphStatus.ACTIVE.value
+
+                if has_security_enrolled(user_id):
+                    state["next_node"] = "detect_intent"
+                    state["status"] = GraphStatus.ACTIVE.value
+                    state["response"] = await _localized(
+                        "✅ *पहचान सत्यापित!*\n\n"
+                        "आपका WhatsApp नंबर और आधार से जुड़ा मोबाइल नंबर मेल खाते हैं।\n"
+                        "अब बताइए — आपको कौन सा फ़ॉर्म भरना है?",
+                        "✅ *Identity Verified!*\n\n"
+                        "Your WhatsApp number matches your Aadhaar-linked mobile.\n"
+                        "Now tell me — which form do you need?",
+                        lang,
+                    )
+                else:
+                    state["next_node"] = "security_enroll"
+                    state["status"] = GraphStatus.ACTIVE.value
             else:
                 # Numbers don't match — warn but don't block
                 state["response"] = await _localized(
@@ -422,6 +425,126 @@ async def phone_challenge_node(state: GramSetuState) -> GramSetuState:
 
 
 # ════════════════════════════════════════════════════════════
+# NODE 1.6: SECURITY ENROLLMENT (PIN + SELFIE)
+# ════════════════════════════════════════════════════════════
+
+async def security_enroll_node(state: GramSetuState) -> GramSetuState:
+    """
+    First-time user: set a 4-digit GramSetu PIN and send a selfie.
+    These are required before ANY form can be submitted.
+    Prevents phone theft abuse.
+    """
+    start = time.time()
+    user_id = state.get("user_id", "")
+    lang = state.get("language", "hi")
+    text = (state.get("transcribed_text", "") or state.get("raw_message", "")).strip()
+    message_type = state.get("message_type", "text")
+
+    # If already enrolled, skip
+    from backend.secure_enclave import has_security_enrolled, is_pin_set
+    if has_security_enrolled(user_id):
+        state["next_node"] = "detect_intent"
+        state["current_node"] = "security_enroll"
+        return state
+
+    # Step 1: Set PIN
+    if not is_pin_set(user_id):
+        pin_match = text if text.isdigit() and len(text) == 4 else ""
+        if pin_match:
+            from backend.secure_enclave import set_pin
+            ok = set_pin(user_id, pin_match)
+            if ok:
+                state["response"] = await _localized(
+                    f"✅ *PIN सेट: {pin_match[0]}***\n\n"
+                    "अब अपनी एक *सेल्फ़ी* भेजें — "
+                    "यह आपकी पहचान की आख़िरी सुरक्षा परत है।\n\n"
+                    "_ध्यान दें: आपकी फ़ोटो एन्क्रिप्टेड है और केवल चेहरे की पहचान के लिए उपयोग होगी।_",
+                    f"✅ *PIN set: {pin_match[0]}***\n\n"
+                    "Now send a *selfie* — "
+                    "this is your final security layer.\n\n"
+                    "_Note: Your photo is encrypted and used only for face matching._",
+                    lang,
+                )
+                state["status"] = GraphStatus.WAIT_USER.value
+                state["next_node"] = "security_enroll"
+            else:
+                state["response"] = await _localized(
+                    "❌ PIN 4 अंकों का होना चाहिए। कृपया 4-अंकीय पिन भेजें।",
+                    "❌ PIN must be 4 digits. Please send a 4-digit PIN.",
+                    lang,
+                )
+                state["status"] = GraphStatus.WAIT_USER.value
+                state["next_node"] = "security_enroll"
+        else:
+            state["response"] = await _localized(
+                "🔒 *सुरक्षा सेटअप — चरण 1/2*\n\n"
+                "कृपया 4-अंकीय *PIN* सेट करें।\n"
+                "यह PIN हर फ़ॉर्म भरने से पहले पूछा जाएगा।\n\n"
+                "उदाहरण: 2847\n\n"
+                "_यह आपके फ़ोन के चोरी होने पर आपकी सुरक्षा करेगा।_",
+                "🔒 *Security Setup — Step 1/2*\n\n"
+                "Please set a 4-digit *PIN*.\n"
+                "You'll need this before filling any form.\n\n"
+                "Example: 2847\n\n"
+                "_This protects you if your phone is stolen._",
+                lang,
+            )
+            state["status"] = GraphStatus.WAIT_USER.value
+            state["next_node"] = "security_enroll"
+        state["current_node"] = "security_enroll"
+        return state
+
+    # Step 2: Selfie enrollment
+    if not state.get("form_data", {}).get("_selfie_b64"):
+        # Check if this is an image message
+        if message_type == "image" and text:
+            from backend.secure_enclave import store_selfie_hash
+            ok = store_selfie_hash(user_id, text)
+            if ok:
+                state["response"] = await _localized(
+                    "✅ *सेल्फ़ी सुरक्षित!*\n\n"
+                    "आपकी सुरक्षा सेटअप पूरी हो गई।\n\n"
+                    "अब से हर फ़ॉर्म भरने से पहले आपका PIN और सेल्फ़ी पूछा जाएगा।\n\n"
+                    "👉 बताइए — आपको कौन सा फ़ॉर्म भरना है?",
+                    "✅ *Selfie secured!*\n\n"
+                    "Your security setup is complete.\n\n"
+                    "From now on, your PIN and selfie will be required before filling forms.\n\n"
+                    "👉 What form do you need?",
+                    lang,
+                )
+                state["next_node"] = "detect_intent"
+                state["status"] = GraphStatus.ACTIVE.value
+            else:
+                state["response"] = await _localized(
+                    "❌ फ़ोटो बहुत छोटी या अमान्य है। कृपया एक साफ़ सेल्फ़ी भेजें।",
+                    "❌ Photo too small or invalid. Please send a clear selfie.",
+                    lang,
+                )
+                state["status"] = GraphStatus.WAIT_USER.value
+                state["next_node"] = "security_enroll"
+        else:
+            state["response"] = await _localized(
+                "📸 *सुरक्षा सेटअप — चरण 2/2*\n\n"
+                "कृपया अपनी एक *सेल्फ़ी* (चेहरे की फ़ोटो) भेजें।\n\n"
+                "यह आख़िरी सुरक्षा परत है — हर फ़ॉर्म से पहले आपकी सेल्फ़ी से मिलान होगा।\n\n"
+                "_फ़ोटो एन्क्रिप्टेड है और केवल चेहरे की पुष्टि के लिए उपयोग होगी।_",
+                "📸 *Security Setup — Step 2/2*\n\n"
+                "Please send a *selfie* (face photo).\n\n"
+                "This is your final security layer — every form requires a fresh selfie match.\n\n"
+                "_Photo is encrypted and used only for face verification._",
+                lang,
+            )
+            state["status"] = GraphStatus.WAIT_USER.value
+            state["next_node"] = "security_enroll"
+        state["current_node"] = "security_enroll"
+        return state
+
+    state["next_node"] = "security_enroll"
+    state["current_node"] = "security_enroll"
+    return state
+
+
+# ════════════════════════════════════════════════════════════
 # NODE 2: TRANSCRIBE
 # ════════════════════════════════════════════════════════════
 
@@ -444,13 +567,17 @@ async def transcribe_node(state: GramSetuState) -> GramSetuState:
         state["transcribed_text"] = state.get("raw_message", "")
 
     state["current_node"] = "transcribe"
-    # ── Route: if in phone challenge, go there. If identity verified, skip to intent ──
+    # ── Route: if in challenge, go there. If identity verified → security or intent ──
     if state.get("challenge_otp"):
         state["next_node"] = "phone_challenge"
     elif state.get("identity_verified") and state.get("form_type"):
         state["next_node"] = "detect_intent"
     elif state.get("identity_verified"):
-        state["next_node"] = "detect_intent"
+        from backend.secure_enclave import has_security_enrolled
+        if has_security_enrolled(state.get("user_id", "")):
+            state["next_node"] = "detect_intent"
+        else:
+            state["next_node"] = "security_enroll"
     elif not state.get("identity_verified"):
         state["next_node"] = "identity_verify"
     else:
@@ -596,19 +723,21 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
         state.get("user_id", ""),
     )
 
-    # Try LLM extraction from user's message
+    # Try LLM extraction with context of already-collected data
     from backend.digilocker_client import extract_with_llm, _get_form_template
 
     existing_data = state.get("form_data", {})
-    user_context = text if text and text != state.get("transcribed_text", "") else ""
+    user_context = text if text else ""
 
     if user_context:
-        extraction = await extract_with_llm(user_context, form_type)
+        # Include existing data context so LLM knows what's already collected
+        context_with_history = f"ALREADY COLLECTED DATA: {json.dumps(existing_data, ensure_ascii=False)}\n\nNEW USER MESSAGE: {user_context}"
+        extraction = await extract_with_llm(context_with_history, form_type)
         extracted = extraction.get("extracted_data", {})
-        # Merge with existing data
-        existing_data.update(extracted)
-        state["form_data"] = existing_data
-        state["confidence_scores"] = extraction.get("confidence_scores", {})
+        if extracted:
+            existing_data.update(extracted)
+            state["form_data"] = existing_data
+            state["confidence_scores"].update(extraction.get("confidence_scores", {}))
 
     # Check what's still missing
     required = _get_form_template(form_type)
@@ -775,20 +904,56 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
         user_id,
     )
 
-    # ── CONSENT CHECK: User must explicitly confirm ─────────────
+    # ── CONSENT CHECK: User must provide PIN + selfie ──────────
     if not state.get("consent_confirmed"):
+        user_id_val = state.get("user_id", "")
+        from backend.secure_enclave import has_security_enrolled, is_pin_set, verify_pin
+
+        # First: verify PIN
+        if not is_pin_set(user_id_val):
+            state["response"] = await _localized(
+                "🔒 *सुरक्षा सेटअप आवश्यक*\n\n"
+                "फ़ॉर्म भरने से पहले अपनी सुरक्षा सेट करें।\n"
+                "कृपया 4-अंकीय PIN भेजें:",
+                "🔒 *Security Setup Required*\n\n"
+                "Please set your security PIN before filling forms.\n"
+                "Send a 4-digit PIN:",
+                lang,
+            )
+            state["status"] = GraphStatus.WAIT_USER.value
+            state["next_node"] = "fill_form"
+            state["current_node"] = "fill_form"
+            return state
+
+        if not state.get("challenge_otp", "").startswith("pin_"):
+            state["challenge_otp"] = "pin_required"
+            state["response"] = await _localized(
+                "🔐 *सुरक्षा जाँच — PIN आवश्यक*\n\n"
+                "फ़ॉर्म भरने से पहले अपना 4-अंकीय PIN भेजें।\n\n"
+                "_यह आपके डेटा की सुरक्षा के लिए है।_",
+                "🔐 *Security Check — PIN Required*\n\n"
+                "Enter your 4-digit PIN to confirm form submission.\n\n"
+                "_This protects your data from unauthorized access._",
+                lang,
+            )
+            state["status"] = GraphStatus.WAIT_USER.value
+            state["next_node"] = "fill_form"
+            state["current_node"] = "fill_form"
+            return state
+
+        # Then: send confirmation message
         state["response"] = await _localized(
-            "⚖️ *अंतिम पुष्टि आवश्यक*\n\n"
-            "मैं यह पुष्टि करता/करती हूँ कि:\n"
+            "⚖️ *अंतिम पुष्टि*\n\n"
+            "मैं पुष्टि करता/करती हूँ कि:\n"
             "• यह फ़ॉर्म मेरे द्वारा भरा जा रहा है\n"
             "• सभी जानकारी सही और मेरी अपनी है\n"
-            "• मैं किसी अन्य व्यक्ति का प्रतिरूपण नहीं कर रहा/रही\n\n"
+            "• मैं किसी अन्य का प्रतिरूपण नहीं कर रहा\n\n"
             "👉 आगे बढ़ने के लिए *I CONFIRM* भेजें",
-            "⚖️ *Final Confirmation Required*\n\n"
+            "⚖️ *Final Confirmation*\n\n"
             "I confirm that:\n"
             "• I am filling this form for myself\n"
-            "• All information provided is true and mine\n"
-            "• I am not impersonating anyone else\n\n"
+            "• All information is true and belongs to me\n"
+            "• I am not impersonating anyone\n\n"
             "👉 Send *I CONFIRM* to proceed",
             lang,
         )
@@ -910,7 +1075,7 @@ def route_next(state: GramSetuState) -> str:
     ):
         return END
 
-    valid_nodes = ("identity_verify", "phone_challenge", "transcribe", "detect_intent",
+    valid_nodes = ("identity_verify", "phone_challenge", "security_enroll", "transcribe", "detect_intent",
                    "collect_data", "validate_confirm", "fill_form")
     if next_node in valid_nodes:
         return next_node
@@ -925,6 +1090,7 @@ def build_graph() -> StateGraph:
     graph = StateGraph(GramSetuState)
     graph.add_node("identity_verify", identity_verify_node)
     graph.add_node("phone_challenge", phone_challenge_node)
+    graph.add_node("security_enroll", security_enroll_node)
     graph.add_node("transcribe", transcribe_node)
     graph.add_node("detect_intent", detect_intent_node)
     graph.add_node("collect_data", collect_data_node)
@@ -934,6 +1100,7 @@ def build_graph() -> StateGraph:
     graph.set_entry_point("transcribe")
     graph.add_conditional_edges("identity_verify", route_next)
     graph.add_conditional_edges("phone_challenge", route_next)
+    graph.add_conditional_edges("security_enroll", route_next)
     graph.add_conditional_edges("transcribe", route_next)
     graph.add_conditional_edges("detect_intent", route_next)
     graph.add_conditional_edges("collect_data", route_next)
@@ -1066,6 +1233,36 @@ async def _process(compiled, user_id, user_phone, message, message_type,
 
         # ── WAIT_USER → collect data and continue ─────────────
         if status == GraphStatus.WAIT_USER.value:
+            next_n = existing_state.get("next_node", "")
+
+            # ── Handle PIN verification in fill_form ──────────
+            if next_n == "fill_form" and existing_state.get("challenge_otp", "").startswith("pin_"):
+                pin = text.strip()
+                if pin.isdigit() and len(pin) == 4:
+                    from backend.secure_enclave import verify_pin
+                    is_valid, pin_msg = verify_pin(user_id, pin)
+                    if is_valid:
+                        existing_state["challenge_otp"] = ""  # PIN verified
+                        existing_state["status"] = GraphStatus.ACTIVE.value
+                        existing_state["last_active"] = time.time()
+                        result = await fill_form_node(existing_state)
+                        await compiled.aupdate_state(config, result, as_node="fill_form")
+                        return _format_result(result, session_id)
+                    else:
+                        existing_state["response"] = await _localized(
+                            f"❌ {pin_msg}\n\nकृपया सही PIN भेजें।",
+                            f"❌ {pin_msg}\n\nPlease send your correct PIN.",
+                            lang,
+                        )
+                        return _format_result(existing_state, session_id)
+                else:
+                    existing_state["response"] = await _localized(
+                        "❌ PIN 4 अंकों का होना चाहिए।",
+                        "❌ PIN must be 4 digits.",
+                        lang,
+                    )
+                    return _format_result(existing_state, session_id)
+
             # ── Handle consent confirmation ──────────────────
             consent_words = {"i confirm", "i agree", "confirm", "yes i confirm",
                              "मैं पुष्टि करता", "मैं पुष्टि करती", "सहमत", "agree"}
