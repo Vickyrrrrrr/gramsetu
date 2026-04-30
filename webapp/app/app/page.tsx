@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Send, Loader2, X, Mic, MicOff, Activity, RefreshCw, Globe, Monitor, Volume2, Database, Wifi, WifiOff } from 'lucide-react'
+import { Send, Loader2, X, Mic, MicOff, Activity, RefreshCw, Globe, Monitor, Volume2, Database, Wifi, WifiOff, Camera } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -358,7 +358,18 @@ export default function AppPage() {
       if (!r.ok) throw new Error(`${r.status}`)
       const d = await r.json()
       if (d.language && LANG_MAP[d.language]) setLang(d.language)
-      addMsg('assistant', d.response || 'Something went wrong.', { screenshotUrl: d.screenshot_url || null, receiptUrl: d.receipt_url || null })
+      if (d.voice_mode) setVoiceMode(true)
+      // Build receipt URL from either API endpoint or PDF base64
+      let receiptUrl = d.receipt_url || null
+      if (!receiptUrl && d.pdf_base64) {
+        const blob = new Blob([Uint8Array.from(atob(d.pdf_base64), c => c.charCodeAt(0))], { type: 'application/pdf' })
+        receiptUrl = URL.createObjectURL(blob)
+      }
+      addMsg('assistant', d.response || 'Something went wrong.', { screenshotUrl: d.screenshot_url || null, receiptUrl })
+      // Auto-play voice in voice-first mode
+      if (d.voice_mode && d.response) {
+        setTimeout(() => playVoice(uid(), d.response), 500)
+      }
     } catch {
       setLastFailedMsg(text)
       addMsg('system', '⚠️ Could not reach server. Click here to retry →')
@@ -389,6 +400,41 @@ export default function AppPage() {
     const txt = Object.entries(d).map(([k, v]) => `${k}: ${v}`).join('\n')
     addMsg('system', 'Loaded from vault')
     setInput(`Here is my information:\n${txt}`)
+  }
+
+  /* ── image upload (document scan) ── */
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [voiceMode, setVoiceMode] = useState(false)
+
+  const uploadDocument = useCallback(async (file: File) => {
+    if (!file || !file.type.startsWith('image/')) return
+    addMsg('user', `📸 Sending document: ${file.name}`)
+    setStatus('loading')
+    try {
+      const reader = new FileReader()
+      const base64 = await new Promise<string>((resolve) => {
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
+        reader.readAsDataURL(file)
+      })
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: base64, user_id: userId, phone: phone || 'anonymous', language: lang, message_type: 'image' }),
+      })
+      if (!r.ok) throw new Error('')
+      const d = await r.json()
+      addMsg('assistant', d.response || 'Document processed.', { screenshotUrl: d.screenshot_url || null, receiptUrl: d.receipt_url || null })
+      if (d.voice_mode) setVoiceMode(true)
+    } catch {
+      addMsg('system', '⚠️ Upload failed. Try typing your info instead.')
+    }
+    finally { setStatus('idle') }
+  }, [userId, phone, lang, addMsg])
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) uploadDocument(file)
+    if (e.target) e.target.value = ''
   }
 
   /* ── simple voice (MediaRecorder upload) ── */
@@ -514,7 +560,10 @@ export default function AppPage() {
               )}
               {m.receiptUrl && (
                 <div className="mt-2">
-                  <a href={m.receiptUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-green-600 hover:bg-green-700">📄 Receipt</a>
+                  <a href={m.receiptUrl} target="_blank" rel="noreferrer" download={m.receiptUrl.startsWith('blob:') ? 'GramSetu_Receipt.pdf' : undefined}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-green-600 hover:bg-green-700">
+                    {m.receiptUrl.startsWith('blob:') || m.receiptUrl.includes('pdf') ? '📄 Download PDF' : '📄 Receipt'}
+                  </a>
                 </div>
               )}
               {m.screenshotUrl && (
@@ -610,6 +659,14 @@ export default function AppPage() {
           className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors"
           style={{ background: recording ? '#dc2626' : '#f5f5f5', color: recording ? '#fff' : '#666' }} title={recording ? 'Stop' : 'Voice'}>
           {recording ? <MicOff size={14} /> : <Mic size={14} />}
+        </button>
+
+        <input type="file" accept="image/*" capture="environment" ref={fileInputRef}
+          onChange={handleFileChange} className="hidden" />
+        <button onClick={() => fileInputRef.current?.click()}
+          className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+          style={{ background: '#f5f5f5', color: '#666' }} title="Upload Aadhaar / Document photo">
+          <Camera size={14} />
         </button>
 
         <button onClick={() => send()} disabled={!input.trim() || status === 'loading'}

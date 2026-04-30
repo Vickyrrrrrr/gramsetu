@@ -115,7 +115,17 @@ async def chat_api(request: Request):
         raise HTTPException(status_code=400, detail="'message' is required")
     result = await _process(user_id, phone, message, "text")
     screenshot_url = f"data:image/png;base64,{result.get('screenshot_b64', '')}" if result.get("screenshot_b64") else None
-    return JSONResponse({"success": True, "response": result["response"], "status": result.get("status", ""), "session_id": result.get("session_id", ""), "language": result.get("language", "hi"), "form_type": result.get("form_type", ""), "form_data": result.get("form_data", {}), "confidence_scores": result.get("confidence_scores", {}), "screenshot_url": screenshot_url, "digilocker_auth_status": result.get("digilocker_auth_status"), "receipt_url": f"/api/receipt/{result['session_id']}" if result.get("receipt_ready") and result.get("session_id") else None})
+    pdf_base64 = result.get("pdf_base64", "")
+    return JSONResponse({
+        "success": True, "response": result["response"],
+        "status": result.get("status", ""), "session_id": result.get("session_id", ""),
+        "language": result.get("language", "hi"), "form_type": result.get("form_type", ""),
+        "form_data": result.get("form_data", {}), "confidence_scores": result.get("confidence_scores", {}),
+        "screenshot_url": screenshot_url, "digilocker_auth_status": result.get("digilocker_auth_status"),
+        "receipt_url": f"/api/receipt/{result['session_id']}" if result.get("receipt_ready") and result.get("session_id") else None,
+        "pdf_base64": pdf_base64, "voice_mode": result.get("voice_mode", False),
+        "voice_language": result.get("voice_language", "hi"),
+    })
 
 # ── Browser Control ───────────────────────────────────────
 @app.post("/api/browser/stop")
