@@ -362,23 +362,10 @@ async def phone_challenge_node(state: GramSetuState) -> GramSetuState:
         state["current_node"] = "phone_challenge"
         return state
 
-    # ── Generate & send new OTP ─────────────────────────────
+    # ── Generate & send new OTP — will be sent via webhook response ──
     from backend.identity_verifier import generate_challenge_otp
     otp = generate_challenge_otp(user_id)
     state["challenge_otp"] = otp
-
-    # Send OTP via WhatsApp Meta API
-    try:
-        from backend.api.routes.meta_webhook import send_meta_message
-        await send_meta_message(user_id,
-            f"🔐 *GramSetu Security Check*\n\n"
-            f"To confirm you're the owner of this WhatsApp number, "
-            f"please reply with this code:\n\n"
-            f"*{otp}*\n\n"
-            f"_This code expires in 5 minutes._"
-        )
-    except Exception:
-        pass  # Will be sent back to user via graph response
 
     state["response"] = await _localized(
         f"🔐 *सुरक्षा जाँच — फ़ोन सत्यापन*\n\n"
