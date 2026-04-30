@@ -251,7 +251,7 @@ export default function LandingPage() {
           <span>Built for Bharat. Built with ❤️</span>
           <div className="flex gap-4">
             <a href="https://github.com/Vickyrrrrrr/gramsetu" target="_blank" rel="noopener noreferrer" className="hover:text-[#0C0C0C] transition-colors">GitHub</a>
-            <a href="#" className="hover:text-[#0C0C0C] transition-colors">Docs</a>
+            <Link href="/terms" className="hover:text-[#0C0C0C] transition-colors">Terms</Link>
             <Link href="/admin" className="hover:text-[#0C0C0C] transition-colors">Admin</Link>
           </div>
         </div>
