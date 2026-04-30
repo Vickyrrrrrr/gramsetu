@@ -490,9 +490,122 @@ async def security_enroll_node(state: GramSetuState) -> GramSetuState:
                 lang,
             )
             state["status"] = GraphStatus.WAIT_USER.value
-            state["next_node"] = "security_enroll"
-        state["current_node"] = "security_enroll"
+    state["next_node"] = "security_enroll"
+    state["current_node"] = "security_enroll"
+    return state
+
+
+# ════════════════════════════════════════════════════════════
+# NODE 1.7: VOICE MODE DETECTION
+# ════════════════════════════════════════════════════════════
+
+async def voice_mode_node(state: GramSetuState) -> GramSetuState:
+    """
+    Detect if user is in voice-first mode.
+    If the message was a voice note, set voice_mode=True.
+    All subsequent replies will be voice notes in the same language.
+    """
+    msg_type = state.get("message_type", "text")
+    if msg_type == "voice":
+        state["voice_mode"] = True
+        # Detect language from transcribed text
+        from lib.language_utils import detect_language
+        detected = detect_language(state.get("transcribed_text", "")) or "hi"
+        state["voice_language"] = detected
+        state["language"] = detected
+    else:
+        # Text message resumes text mode
+        state["voice_mode"] = False
+    state["next_node"] = "detect_intent"
+    state["current_node"] = "voice_mode"
+    return state
+
+
+# ════════════════════════════════════════════════════════════
+# NODE 1.8: DOCUMENT SCAN (Aadhaar photo → text extraction)
+# ════════════════════════════════════════════════════════════
+
+async def document_scan_node(state: GramSetuState) -> GramSetuState:
+    """
+    If user sent an image (Aadhaar card, PAN, etc.), use VLM to extract text.
+    This allows village users to just photograph their documents.
+    """
+    msg_type = state.get("message_type", "text")
+    raw_message = state.get("raw_message", "")
+    lang = state.get("language", "hi")
+
+    # Only process image messages
+    if msg_type != "image" or not raw_message or len(raw_message) < 500:
+        state["next_node"] = "collect_data"
+        state["current_node"] = "document_scan"
         return state
+
+    # Use NVIDIA VLM to extract text from document photo
+    try:
+        from backend.llm_client import chat_vision
+        prompt = (
+            "You are an OCR and document reader for Indian government forms. "
+            "Extract ALL visible text from this document photo. "
+            "It may be an Aadhaar card, PAN card, ration card, or other ID. "
+            "Return ONLY valid JSON with these keys:\n"
+            "- extracted_data: {field_name: value} for every field you can read\n"
+            "- document_type: 'aadhaar', 'pan', 'ration', 'voter', 'unknown'\n"
+            "- confidence: 0.0-1.0\n\n"
+            "Common fields: name, aadhaar_number, date_of_birth, gender, father_name, "
+            "mobile_number, address, pan_number, pincode, district, state.\n"
+            "Return Hindi/English text exactly as shown on the document."
+        )
+        vlm_result = await chat_vision(raw_message, prompt, temperature=0.0, max_tokens=1024)
+        if vlm_result:
+            import re as _re
+            m = _re.search(r'\{.*\}', vlm_result, _re.DOTALL)
+            if m:
+                import json as _j
+                parsed = _j.loads(m.group(0))
+                doc_type = parsed.get("document_type", "unknown")
+                extracted = parsed.get("extracted_data", {})
+                conf = parsed.get("confidence", 0.7)
+
+                if extracted:
+                    # Merge into form_data
+                    existing = state.get("form_data", {})
+                    existing.update(extracted)
+                    state["form_data"] = existing
+                    state["confidence_scores"].update(
+                        {k: conf for k in extracted}
+                    )
+
+                    # Show user what was extracted
+                    fields_found = "\n".join(
+                        f"  ✅ {k.replace('_',' ').title()}: {v}"
+                        for k, v in list(extracted.items())[:8]
+                    )
+                    state["response"] = await _localized(
+                        f"📸 *दस्तावेज़ से पढ़ा गया:*\n\n{fields_found}\n\n"
+                        f"यदि यह जानकारी सही है तो *YES* भेजें।\n"
+                        f"या सही जानकारी भेजें।",
+                        f"📸 *Read from document:*\n\n{fields_found}\n\n"
+                        f"Reply *YES* if correct, or send corrections.",
+                        lang,
+                    )
+                    state["status"] = GraphStatus.WAIT_USER.value
+                    state["next_node"] = "document_scan"
+                    state["current_node"] = "document_scan"
+                    state["form_data"]["_doc_type"] = doc_type
+                    return state
+    except Exception as e:
+        print(f"[DocScan] VLM extraction failed: {e}")
+
+    # Fallback: couldn't read document
+    state["response"] = await _localized(
+        "📸 फ़ोटो मिली, लेकिन दस्तावेज़ पढ़ नहीं पाया।\nकृपया जानकारी टाइप करें या साफ़ फ़ोटो भेजें।",
+        "📸 Got the photo, but couldn't read the document.\nPlease type your info or send a clearer photo.",
+        lang,
+    )
+    state["status"] = GraphStatus.WAIT_USER.value
+    state["next_node"] = "collect_data"
+    state["current_node"] = "document_scan"
+    return state
 
     # Step 2: Selfie enrollment
     # Accept image via message_type="image" or special commands
@@ -566,6 +679,10 @@ async def transcribe_node(state: GramSetuState) -> GramSetuState:
     # ── Route: if in challenge, go there. If identity verified → security or intent ──
     if state.get("challenge_otp"):
         state["next_node"] = "phone_challenge"
+    elif state.get("message_type") == "image" and state.get("identity_verified"):
+        state["next_node"] = "document_scan"
+    elif state.get("message_type") == "voice" and state.get("identity_verified"):
+        state["next_node"] = "voice_mode"
     elif state.get("identity_verified") and state.get("form_type"):
         state["next_node"] = "detect_intent"
     elif state.get("identity_verified"):
@@ -1026,9 +1143,32 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
         import hashlib as _hs
         ref = "GS" + _hs.md5(f"{form_type}{time.time()}".encode()).hexdigest()[:10].upper()
 
+        # ── Generate PDF ───────────────────────────────────
+        from backend.generate_pdf import generate_and_encode
+        try:
+            pdf_b64 = generate_and_encode(form_type, form_data, ref, state.get("user_phone", ""))
+            state["pdf_base64"] = pdf_b64
+        except Exception as e:
+            print(f"[PDF] Generation failed: {e}")
+
+        # ── Voice summary for voice-first users ───────────
+        voice_summary = ""
+        if state.get("voice_mode"):
+            fields_summary = ", ".join(
+                f"{k.replace('_', ' ')}: {v}"
+                for k, v in list(form_data.items())[:6] if v and not isinstance(v, dict)
+            )
+            voice_summary = (
+                f"Your {form_type.replace('_',' ').title()} application is submitted. "
+                f"Reference: {ref.split('-')[-1] if '-' in ref else ref}. "
+                f"Details: {fields_summary}. "
+                f"You will receive SMS confirmation. Thank you for using GramSetu."
+            )
+            state["voice_summary"] = voice_summary
+
         state["response"] = await _localized(
-            f"✅ *आवेदन सफलतापूर्वक जमा!*\n\n🔢 संदर्भ: *{ref}*\n📱 SMS पर पुष्टि मिलेगी।\n\n📄 नीचे बटन से रसीद डाउनलोड करें।",
-            f"✅ *Application Submitted!*\n\n🔢 Reference: *{ref}*\n📱 Confirmation SMS sent.\n\n📄 Download receipt below.",
+            f"✅ *आवेदन सफलतापूर्वक जमा!*\n\n🔢 संदर्भ: *{ref}*\n📱 SMS पर पुष्टि मिलेगी।\n\n📄 PDF रसीद तैयार है।",
+            f"✅ *Application Submitted!*\n\n🔢 Reference: *{ref}*\n📱 Confirmation SMS sent.\n\n📄 PDF receipt ready.",
             lang,
         )
         state["status"] = GraphStatus.COMPLETED.value
@@ -1133,7 +1273,8 @@ def route_next(state: GramSetuState) -> str:
     ):
         return END
 
-    valid_nodes = ("identity_verify", "phone_challenge", "security_enroll", "transcribe", "detect_intent",
+    valid_nodes = ("identity_verify", "phone_challenge", "security_enroll", "voice_mode",
+                   "document_scan", "transcribe", "detect_intent",
                    "collect_data", "validate_confirm", "fill_form")
     if next_node in valid_nodes:
         return next_node
@@ -1149,6 +1290,8 @@ def build_graph() -> StateGraph:
     graph.add_node("identity_verify", identity_verify_node)
     graph.add_node("phone_challenge", phone_challenge_node)
     graph.add_node("security_enroll", security_enroll_node)
+    graph.add_node("voice_mode", voice_mode_node)
+    graph.add_node("document_scan", document_scan_node)
     graph.add_node("transcribe", transcribe_node)
     graph.add_node("detect_intent", detect_intent_node)
     graph.add_node("collect_data", collect_data_node)
@@ -1159,6 +1302,8 @@ def build_graph() -> StateGraph:
     graph.add_conditional_edges("identity_verify", route_next)
     graph.add_conditional_edges("phone_challenge", route_next)
     graph.add_conditional_edges("security_enroll", route_next)
+    graph.add_conditional_edges("voice_mode", route_next)
+    graph.add_conditional_edges("document_scan", route_next)
     graph.add_conditional_edges("transcribe", route_next)
     graph.add_conditional_edges("detect_intent", route_next)
     graph.add_conditional_edges("collect_data", route_next)
@@ -1365,6 +1510,7 @@ async def _process(compiled, user_id, user_phone, message, message_type,
         "otp_value": "", "identity_verified": False,
         "challenge_otp": "", "challenge_otp_attempts": 0,
         "consent_confirmed": False,
+        "voice_mode": False, "voice_language": "hi", "voice_summary": "",
         "browser_launched": False, "portal_url": "",
         "screenshot_b64": "", "audit_entries": [], "pii_accessed": [],
         "last_active": time.time(), "receipt_ready": False,
@@ -1423,4 +1569,8 @@ def _format_result(state: GramSetuState, session_id: str) -> dict:
         "screenshot_b64": screenshot,
         "receipt_ready": state.get("receipt_ready", False),
         "reference_number": state.get("reference_number", ""),
+        "pdf_base64": state.get("pdf_base64", ""),
+        "voice_mode": state.get("voice_mode", False),
+        "voice_language": state.get("voice_language", "hi"),
+        "voice_summary": state.get("voice_summary", ""),
     }

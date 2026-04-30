@@ -82,6 +82,8 @@ class GramSetuState(TypedDict, total=False):
     challenge_otp: str          # WhatsApp challenge OTP for phone proof
     challenge_otp_attempts: int # Number of OTP attempts
     consent_confirmed: bool     # User explicitly confirmed submission
+    voice_mode: bool            # Voice-first conversation mode
+    voice_language: str         # User's spoken language for TTS replies
     review_required: bool
     review_reasons: list
     review_checklist: list

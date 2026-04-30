@@ -84,13 +84,22 @@ async def receive_message(request: Request):
                 msg_type = msg.get("type", "text")
                 text = extract_text(msg)
                 
+                # Handle voice/audio: download, transcribe, process as voice message
+                if msg_type == "audio" and msg.get("audio", {}).get("id"):
+                    audio_id = msg["audio"]["id"]
+                    audio_b64 = await download_meta_media(audio_id)
+                    if audio_b64:
+                        tasks.append(process_voice_message(sender_phone, audio_b64))
+                    else:
+                        tasks.append(process_and_reply(sender_phone, "[Voice note — send text for now]"))
+                
                 # Handle images: download from Meta, convert to base64
-                if msg_type == "image" and msg.get("image", {}).get("id"):
+                elif msg_type == "image" and msg.get("image", {}).get("id"):
                     image_id = msg["image"]["id"]
-                    image_b64 = await download_meta_image(image_id)
-                    caption = msg.get("image", {}).get("caption", "") or "[Selfie]"
+                    image_b64 = await download_meta_media(image_id)
+                    caption = msg.get("image", {}).get("caption", "") or "[Photo]"
                     if image_b64:
-                        tasks.append(process_and_reply(sender_phone, caption, "image", image_b64))
+                        tasks.append(process_and_reply(sender_phone, caption or "📸 Photo received", "image", image_b64))
                     else:
                         tasks.append(process_and_reply(sender_phone, caption or "📸 Photo received"))
                 elif text and sender_phone:
@@ -165,6 +174,21 @@ async def process_and_reply(phone: str, text: str, msg_type: str = "text", image
         response_text = result.get("response", "")
         if response_text:
             await send_meta_message(phone, response_text[:4000])
+
+        # If voice mode, also send voice reply
+        if result.get("voice_mode") and response_text:
+            await send_meta_voice(phone, response_text, result.get("voice_language", "hi"))
+
+        # Send PDF if receipt ready
+        if result.get("receipt_ready"):
+            pdf_b64 = result.get("pdf_base64", "")
+            if pdf_b64:
+                await send_meta_document(phone, pdf_b64, "GramSetu_Receipt.pdf")
+
+            # Send voice summary
+            voice_summary = result.get("voice_summary", "")
+            if voice_summary:
+                await send_meta_voice(phone, voice_summary, result.get("voice_language", "hi"))
 
         # If screenshot available, send as image
         screenshot = result.get("screenshot_b64", "")
@@ -284,10 +308,94 @@ def extract_text(msg: dict) -> str:
     return ""
 
 
-async def download_meta_image(image_id: str) -> str:
-    """Download an image from Meta's media API and return as base64."""
+async def download_meta_media(media_id: str) -> str:
+    """Download an image or audio from Meta's media API and return as base64."""
     if not META_ACCESS_TOKEN:
         return ""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            url_resp = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{media_id}",
+                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
+            )
+            if url_resp.status_code != 200:
+                return ""
+            media_url = url_resp.json().get("url", "")
+            if not media_url:
+                return ""
+
+            dl_resp = await client.get(
+                media_url,
+                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
+            )
+            if dl_resp.status_code != 200:
+                return ""
+            return base64.b64encode(dl_resp.content).decode()
+    except Exception as e:
+        print(f"[Meta] Media download failed: {e}")
+        return ""
+
+
+async def process_voice_message(phone: str, audio_b64: str):
+    """Process a WhatsApp voice note: STT → agent → optional TTS reply."""
+    import tempfile
+    try:
+        # Decode and save to temp file
+        audio_bytes = base64.b64decode(audio_b64)
+        if not audio_bytes or len(audio_bytes) < 100:
+            await send_meta_message(phone, "🎙️ Voice note was too short. Please type your message.")
+            return
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        # STT: Sarvam → Groq
+        from backend.llm_client import transcribe_audio_sarvam, transcribe_audio_groq
+        text = await transcribe_audio_sarvam(tmp_path, "hi")
+        if not text:
+            text = await transcribe_audio_groq(tmp_path, "hi")
+
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+        if not text:
+            await send_meta_message(phone, "🎙️ Could not understand. Please type or try again.")
+            return
+
+        # Process through agent as VOICE message
+        from backend.agents.graph import process_message as agent_process
+        result = await agent_process(
+            user_id=phone, user_phone=phone, message=text,
+            message_type="voice", language="hi", session_id="",
+        )
+
+        # Send text response
+        response_text = result.get("response", "")
+        if response_text:
+            await send_meta_message(phone, response_text[:4000])
+
+        # If voice mode, also send voice reply
+        if result.get("voice_mode") and response_text:
+            voice_lang = result.get("voice_language", "hi")
+            await send_meta_voice(phone, response_text, voice_lang)
+
+        # Send PDF if ready
+        if result.get("receipt_ready"):
+            pdf_b64 = result.get("pdf_base64", "")
+            if pdf_b64:
+                await send_meta_document(phone, pdf_b64, "GramSetu_Receipt.pdf")
+
+            # Send voice summary
+            voice_summary = result.get("voice_summary", "")
+            if voice_summary:
+                await send_meta_voice(phone, voice_summary, result.get("voice_language", "hi"))
+
+    except Exception as e:
+        print(f"[Meta] Voice processing failed: {e}")
+        await send_meta_message(phone, "🎙️ Voice processing error. Please type your message.")
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             # Step 1: Get image URL from Meta
@@ -312,5 +420,57 @@ async def download_meta_image(image_id: str) -> str:
             # Step 3: Return base64
             return base64.b64encode(dl_resp.content).decode()
     except Exception as e:
-        print(f"[Meta] Image download failed: {e}")
+        print(f"[Meta] Media download failed: {e}")
         return ""
+
+
+async def send_meta_voice(to: str, text: str, language: str = "hi") -> dict:
+    """Generate TTS audio (Sarvam Bulbul) and send as WhatsApp voice note."""
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
+        return {"sent": False}
+    try:
+        from lib.voice_handler import generate_voice
+        audio_bytes = await generate_voice(text, language)
+        if not audio_bytes:
+            return {"sent": False, "error": "TTS failed"}
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            upload_resp = await client.post(
+                f"{META_API_URL}/media",
+                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
+                files={"file": ("voice.ogg", audio_bytes, "audio/ogg"), "messaging_product": (None, "whatsapp")},
+            )
+        if upload_resp.status_code != 200:
+            return {"sent": False}
+        media_id = upload_resp.json().get("id", "")
+        resp = await httpx.AsyncClient(timeout=15.0).post(
+            f"{META_API_URL}/messages",
+            headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"},
+            json={"messaging_product": "whatsapp", "to": to, "type": "audio", "audio": {"id": media_id}},
+        )
+        return {"sent": resp.status_code == 200}
+    except Exception as e:
+        return {"sent": False, "error": str(e)}
+
+
+async def send_meta_document(to: str, doc_b64: str, filename: str) -> dict:
+    """Send a PDF document via WhatsApp."""
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
+        return {"sent": False}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            upload_resp = await client.post(
+                f"{META_API_URL}/media",
+                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
+                files={"file": (filename, base64.b64decode(doc_b64), "application/pdf"), "messaging_product": (None, "whatsapp")},
+            )
+        if upload_resp.status_code != 200:
+            return {"sent": False}
+        media_id = upload_resp.json().get("id", "")
+        resp = await httpx.AsyncClient(timeout=15.0).post(
+            f"{META_API_URL}/messages",
+            headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"},
+            json={"messaging_product": "whatsapp", "to": to, "type": "document", "document": {"id": media_id, "filename": filename}},
+        )
+        return {"sent": resp.status_code == 200}
+    except Exception as e:
+        return {"sent": False, "error": str(e)}
