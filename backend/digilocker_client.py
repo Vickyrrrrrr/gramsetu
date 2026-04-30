@@ -32,59 +32,48 @@ def _get_demo_data(form_type: str) -> dict:
 
 
 def _get_form_template(form_type: str) -> list[str]:
-    """Return the list of required fields for a form type."""
-    templates = {
-        "ration_card": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "gender",
-            "family_head_name", "family_members", "annual_income", "category",
-            "mobile_number", "address",
-        ],
-        "pension": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "pension_type",
-            "gender", "mobile_number", "annual_income", "address", "bank_account",
-        ],
-        "pan_card": [
-            "full_name", "date_of_birth", "father_name", "aadhaar_number",
-            "mobile_number", "email", "address",
-        ],
-        "voter_id": [
-            "full_name", "date_of_birth", "father_name", "aadhaar_number",
-            "mobile_number", "address",
-        ],
-        "ayushman_bharat": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "gender",
-            "mobile_number", "annual_income", "family_members", "address", "bank_account",
-        ],
-        "mnrega": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "gender",
-            "mobile_number", "household_head_name", "family_members", "address", "bank_account",
-        ],
-        "pm_kisan": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "gender",
-            "mobile_number", "land_holding_acres", "annual_income", "address", "bank_account",
-        ],
-        "caste_certificate": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "gender",
-            "caste", "father_name", "mobile_number", "address",
-        ],
-        "birth_certificate": [
-            "child_name", "date_of_birth", "place_of_birth", "gender",
-            "father_name", "mother_name", "mobile_number", "address",
-        ],
-        "kisan_credit_card": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "gender",
-            "mobile_number", "land_holding_acres", "land_record_number",
-            "crop_type", "loan_amount_required", "annual_income", "address", "bank_account",
-        ],
-        "jan_dhan": [
-            "applicant_name", "aadhaar_number", "date_of_birth", "gender",
-            "mobile_number", "occupation", "address",
-        ],
-    }
-    return templates.get(form_type, [
-        "name", "aadhaar_number", "date_of_birth", "gender",
-        "mobile_number", "address",
-    ])
+    """
+    Returns empty list — fields are now determined dynamically by the LLM.
+    No more hardcoded field templates for any form type.
+    """
+    return []
+
+
+async def infer_form_fields(form_type: str, lang: str = "hi") -> list[str]:
+    """
+    Use LLM to dynamically determine what fields a form needs.
+    Works for ANY form type — government or private.
+    """
+    try:
+        from backend.llm_client import chat_intent
+        prompt = (
+            "You are an expert on Indian government forms. "
+            f"List ALL the fields required for a '{form_type}' application. "
+            "Return ONLY a JSON array of field names using snake_case. "
+            "Include personal details, address, bank details, and any form-specific fields. "
+            "Example: ['applicant_name', 'aadhaar_number', 'date_of_birth', 'gender', 'mobile_number', 'address']"
+        )
+        messages = [
+            {"role": "system", "content": "You are a form schema expert. Return ONLY valid JSON arrays."},
+            {"role": "user", "content": prompt},
+        ]
+        raw = await chat_intent(messages, temperature=0.1, max_tokens=512)
+        if raw:
+            import re
+            import json
+            m = re.search(r'\[.*\]', raw, re.DOTALL)
+            if m:
+                fields = json.loads(m.group(0))
+                if isinstance(fields, list) and len(fields) > 0:
+                    return fields
+    except Exception as e:
+        print(f"[DigiLocker] Field inference failed: {e}")
+
+    # Common fallback fields for any form
+    return [
+        "applicant_name", "aadhaar_number", "date_of_birth", "gender",
+        "mobile_number", "address"
+    ]
 
 
 async def extract_with_llm(user_context: str, form_type: str) -> dict:

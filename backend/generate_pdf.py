@@ -11,7 +11,6 @@ Generates clean, professional PDFs with:
 No system dependencies — pure Python fpdf2.
 """
 import base64
-import os
 from datetime import datetime
 from fpdf import FPDF
 

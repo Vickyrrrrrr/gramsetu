@@ -15,7 +15,6 @@ Meta sends:
   POST /api/whatsapp/webhook  (message payload)
 """
 import os
-import json
 import base64
 import httpx
 import asyncio
@@ -396,32 +395,6 @@ async def process_voice_message(phone: str, audio_b64: str):
     except Exception as e:
         print(f"[Meta] Voice processing failed: {e}")
         await send_meta_message(phone, "🎙️ Voice processing error. Please type your message.")
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            # Step 1: Get image URL from Meta
-            url_resp = await client.get(
-                f"https://graph.facebook.com/{META_API_VERSION}/{image_id}",
-                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
-            )
-            if url_resp.status_code != 200:
-                return ""
-            image_url = url_resp.json().get("url", "")
-            if not image_url:
-                return ""
-
-            # Step 2: Download image bytes
-            dl_resp = await client.get(
-                image_url,
-                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
-            )
-            if dl_resp.status_code != 200:
-                return ""
-
-            # Step 3: Return base64
-            return base64.b64encode(dl_resp.content).decode()
-    except Exception as e:
-        print(f"[Meta] Media download failed: {e}")
-        return ""
 
 
 async def send_meta_voice(to: str, text: str, language: str = "hi") -> dict:

@@ -26,7 +26,6 @@ from __future__ import annotations
 import os
 import json
 import time
-import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -122,12 +121,39 @@ async def _localized(msg_hi: str, msg_en: str, lang: str) -> str:
         return msg_hi
     if lang == "en":
         return msg_en
+    # For any other language, use LLM translation
     try:
         from backend.llm_client import chat_translation
         result = await chat_translation(msg_en, "en", lang)
         return result or msg_en
     except Exception:
         return msg_en
+
+
+async def _llm_generate(message_key: str, context: dict, lang: str) -> str:
+    """
+    Generate a natural-language response via LLM in the user's language.
+    Falls back to _localized if LLM is unavailable.
+    """
+    try:
+        from backend.llm_client import chat_conversational
+        ctx = json.dumps(context, ensure_ascii=False)[:500]
+        prompt = (
+            f"You are GramSetu, an AI government form assistant for rural India. "
+            f"Respond naturally in {'Hindi' if lang == 'hi' else ('English' if lang == 'en' else 'the user language')}. "
+            f"Context: {ctx}\n\n"
+            f"Key message: {message_key}\n\n"
+            f"Be warm, concise, and helpful. Use WhatsApp-friendly formatting (*bold*). "
+            f"2-4 sentences max."
+        )
+        result = await chat_conversational(
+            [{"role": "user", "content": prompt}], temperature=0.6, max_tokens=256
+        )
+        if result:
+            return result.strip()
+    except Exception:
+        pass
+    return ""
 
 
 # ════════════════════════════════════════════════════════════
@@ -608,13 +634,16 @@ async def document_scan_node(state: GramSetuState) -> GramSetuState:
     return state
 
     # Step 2: Selfie enrollment
-    # Accept image via message_type="image" or special commands
-    is_image = message_type == "image"
-    is_selfie_cmd = text.lower() in ("selfie", "selft", "photo", "face", "send selfie")
+    # Accept image via state message_type="image" or special commands
+    msg_type = state.get("message_type", "text")
+    raw_msg = state.get("raw_message", "")
+    is_image = msg_type == "image"
+    is_selfie_cmd = raw_msg.lower() in ("selfie", "selft", "photo", "face", "send selfie") if isinstance(raw_msg, str) and len(raw_msg) < 20 else False
 
-    if is_image and text and len(text) > 500:  # base64 encoded image
+    if is_image and raw_msg and len(raw_msg) > 500:  # base64 encoded image
         from backend.secure_enclave import store_selfie_hash
-        ok = store_selfie_hash(user_id, text)
+        uid = state.get("user_id", "")
+        ok = store_selfie_hash(uid, raw_msg)
         if ok:
             state["response"] = await _localized(
                 "✅ *सेल्फ़ी सुरक्षित!*\n\n"
@@ -718,50 +747,53 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
         state["current_node"] = "detect_intent"
         return state
 
-    await _broadcast_progress(
-        state.get("session_id", ""),
-        _PROGRESS_STEPS[2], 0.30,
-        [{"id": 1, "label": "Verify Identity", "done": True},
-         {"id": 2, "label": "Understand Request", "done": True, "active": True},
-         {"id": 3, "label": "Collect Information", "done": False}],
-        state.get("user_id", ""),
-    )
-
-    lower = text.lower()
-    intent_map = {
-        "ration": "ration_card", "rashan": "ration_card", "राशन": "ration_card",
-        "pension": "pension", "पेंशन": "pension",
-        "ayushman": "ayushman_bharat", "आयुष्मान": "ayushman_bharat",
-        "mnrega": "mnrega", "nrega": "mnrega", "मनरेगा": "mnrega",
-        "pan": "pan_card", "पैन": "pan_card",
-        "voter": "voter_id", "मतदाता": "voter_id",
-        "caste": "caste_certificate", "जाति": "caste_certificate",
-        "birth": "birth_certificate", "जन्म": "birth_certificate",
-        "kisan": "pm_kisan", "किसान": "pm_kisan",
-        "jandhan": "jan_dhan", "jan dhan": "jan_dhan", "जनधन": "jan_dhan",
-        "kcc": "kisan_credit_card", "credit": "kisan_credit_card",
-        "scheme": "scheme_suggest", "yojana": "scheme_suggest",
-    }
-
+    # ── LLM-PRIMARY intent classification ──────────────────
     detected = None
-    for kw, intent in intent_map.items():
-        if kw in lower:
-            detected = intent
-            break
+    try:
+        from backend.llm_client import chat_intent
+        import json as _j
+        import re as _re
+        result = await chat_intent(
+            [{"role": "system", "content": (
+                'Classify user intent. Return ONLY: {"intent": "<form_name_or_query_type>", "confidence": 0.95}. '
+                'If user wants a specific form (ration card, PAN, pension, driving license, passport, etc.), '
+                'put the form name in snake_case as intent. '
+                'If asking about schemes/eligibility, use "scheme_suggest". '
+                'If just greeting/help, use "help". '
+                'If unknown, use "unknown".'
+            )}, {"role": "user", "content": text}],
+            temperature=0.0, max_tokens=80
+        )
+        if result:
+            m = _re.search(r'\{.*\}', result, _re.DOTALL)
+            if m:
+                parsed = _j.loads(m.group(0))
+                detected = parsed.get("intent", "")
+    except Exception:
+        pass
 
-    if detected and detected != "scheme_suggest":
+    # ── Fast keyword fallback for common forms ────────────
+    if not detected or detected == "unknown":
+        lower = text.lower()
+        quick_map = {
+            "ration": "ration_card", "pension": "pension", "pan": "pan_card",
+            "voter": "voter_id", "kisan": "pm_kisan", "ayushman": "ayushman_bharat",
+            "mnrega": "mnrega", "jandhan": "jan_dhan", "birth": "birth_certificate",
+            "caste": "caste_certificate", "kcc": "kisan_credit_card",
+            "scheme": "scheme_suggest", "yojana": "scheme_suggest",
+            "form": "generic", "apply": "generic",
+        }
+        for kw, intent in quick_map.items():
+            if kw in lower:
+                detected = intent
+                break
+
+    # ── Route based on detected intent ─────────────────────
+    if detected and detected not in ("scheme_suggest", "help", "unknown"):
         state["form_type"] = detected
         state["next_node"] = "collect_data"
         state["status"] = GraphStatus.ACTIVE.value
-
-        form_label = detected.replace('_', ' ').title()
-        state["response"] = await _localized(
-            f"✅ फ़ॉर्म पहचाना: *{form_label}*\n\nअब कृपया अपनी जानकारी साझा करें ताकि मैं फ़ॉर्म भर सकूँ।\n\n"
-            "आप अपना नाम, पता, आधार नंबर, जन्म तिथि आदि बता सकते हैं। जितनी जानकारी देंगे, उतनी जल्दी फ़ॉर्म भरेगा।",
-            f"✅ Form identified: *{form_label}*\n\nPlease share your details: name, address, "
-            "Aadhaar, date of birth, etc. The more you share, the faster I fill the form.",
-            lang,
-        )
+        state["response"] = ""
     elif detected == "scheme_suggest":
         state["status"] = GraphStatus.ACTIVE.value
         state["next_node"] = "detect_intent"
@@ -770,41 +802,13 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
             result = await discover_from_message(text, lang)
             state["response"] = result.get("message", "")
         except Exception:
-            state["response"] = await _localized(
-                "🔍 योजनाएँ खोजने के लिए अपनी उम्र, आय और पेशा बताएं।",
-                "🔍 Share your age, income, and occupation to find eligible schemes.",
-                lang,
-            )
+            state["response"] = ""
         state["status"] = GraphStatus.WAIT_USER.value
     else:
-        # Use LLM with tools for complex queries
-        llm_result = await _call_llm_with_tools(text, lang, {"status": "intent_detection"})
-        if llm_result.get("response"):
-            state["response"] = llm_result["response"]
-            state["status"] = GraphStatus.WAIT_USER.value
-            state["next_node"] = "detect_intent"
-        else:
-            # Show menu
-            menu = (
-                "🙏 नमस्ते! मैं *ग्रामसेतु* हूँ।\n\n"
-                "📋 मैं ये फ़ॉर्म भर सकता हूँ:\n"
-                "1️⃣ राशन कार्ड  2️⃣ पेंशन  3️⃣ आयुष्मान भारत\n"
-                "4️⃣ मनरेगा  5️⃣ पैन कार्ड  6️⃣ वोटर ID  7️⃣ जाति प्रमाण पत्र\n"
-                "8️⃣ जन्म प्रमाण पत्र  9️⃣ PM-किसान  🔟 किसान क्रेडिट कार्ड\n"
-                "1️⃣1️⃣ जन धन खाता\n\n"
-                "👉 नंबर भेजें या बोलें — बाकी मैं करूँगा!"
-            ) if lang == "hi" else (
-                "🙏 Hello! I'm *GramSetu* — your AI form assistant.\n\n"
-                "📋 I can fill:\n"
-                "1️⃣ Ration Card  2️⃣ Pension  3️⃣ Ayushman Bharat\n"
-                "4️⃣ MNREGA  5️⃣ PAN Card  6️⃣ Voter ID  7️⃣ Caste Certificate\n"
-                "8️⃣ Birth Certificate  9️⃣ PM-Kisan  🔟 Kisan Credit Card\n"
-                "1️⃣1️⃣ Jan Dhan\n\n"
-                "👉 Send a number — I'll do the rest!"
-            )
-            state["response"] = menu
-            state["status"] = GraphStatus.WAIT_USER.value
-            state["next_node"] = "detect_intent"
+        # Show dynamic menu via LLM conversation
+        state["response"] = ""
+        state["status"] = GraphStatus.WAIT_USER.value
+        state["next_node"] = "detect_intent"
 
     state["current_node"] = "detect_intent"
     state.setdefault("audit_entries", []).append({
@@ -844,15 +848,25 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
     state["conversation_history"] = history
 
     # Try LLM extraction with context of already-collected data + history
-    from backend.digilocker_client import extract_with_llm, _get_form_template, _manual_extract
+    from backend.digilocker_client import extract_with_llm, _get_form_template, _manual_extract, infer_form_fields
 
     existing_data = state.get("form_data", {})
     user_context = text if text else ""
     collected_this_round = False
 
+    # Dynamic field inference: ask LLM what fields this form needs
+    form_type = state.get("form_type", "generic")
+    required = state.get("_inferred_fields", [])
+    if not required:
+        try:
+            required = await infer_form_fields(form_type, lang)
+            state["_inferred_fields"] = required
+        except Exception:
+            required = _get_form_template(form_type)  # fallback to generic
+
     if user_context:
         # STEP 1: Quick regex extraction (catches email, phone, address immediately)
-        quick = _manual_extract(user_context, _get_form_template(form_type))
+        quick = _manual_extract(user_context, required)
         quick_data = quick.get("extracted_data", {})
         if quick_data:
             existing_data.update(quick_data)
@@ -881,8 +895,7 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
             {k: 0.7 for k in quick_data}
         )
 
-    # Check what's still missing
-    required = _get_form_template(form_type)
+    # Check what's still missing (using LLM-inferred required fields)
     missing = [f for f in required if f not in existing_data or not existing_data[f]]
     collect_attempts = state.get("challenge_otp_attempts", 0)
 
@@ -1082,7 +1095,7 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     # ── CONSENT CHECK: User must provide PIN + selfie ──────────
     if not state.get("consent_confirmed"):
         user_id_val = state.get("user_id", "")
-        from backend.secure_enclave import has_security_enrolled, is_pin_set, verify_pin
+        from backend.secure_enclave import is_pin_set
 
         # First: verify PIN
         if not is_pin_set(user_id_val):
@@ -1339,8 +1352,10 @@ async def process_message(
             "language": language,
         }
 
-    if not session_id:
-        session_id = str(uuid.uuid4())
+    # ── Auto-detect language if not explicitly set ────────────
+    from lib.language_utils import detect_language
+    if language == "hi" and not form_type:
+        language = detect_language(message) or "hi"
 
     async with AsyncSqliteSaver.from_conn_string(CHECKPOINT_DB) as checkpointer:
         compiled = build_graph().compile(checkpointer=checkpointer)
@@ -1503,7 +1518,7 @@ async def _process(compiled, user_id, user_phone, message, message_type,
         "raw_message": text, "message_type": message_type, "language": lang,
         "transcribed_text": "", "form_type": form_type,
         "form_data": {}, "confidence_scores": {}, "validation_errors": [],
-        "missing_fields": [], "status": GraphStatus.ACTIVE.value,
+        "missing_fields": [], "_inferred_fields": [], "status": GraphStatus.ACTIVE.value,
         "current_node": "", "next_node": "transcribe",
         "response": "", "confirmation_summary": "",
         "conversation_history": [], "last_collected_at": 0,

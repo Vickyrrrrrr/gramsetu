@@ -7,9 +7,8 @@ import hashlib
 import random
 from backend.persistent_state import (
     store_verified, is_verified as _is_verified,
-    store_identity_hash as _store_id_hash, get_identity_hash as _get_id_hash,
-    store_challenge, get_challenge, delete_challenge,
-    set_state, get_state, rate_check,
+    store_identity_hash as _store_id_hash, store_challenge, get_challenge, delete_challenge,
+    rate_check,
 )
 
 _MAX_CHALLENGE_ATTEMPTS = 3
@@ -42,11 +41,9 @@ def hash_identity(aadhaar: str, phone: str = "") -> str:
 
 
 def check_duplicate_identity(user_id: str, aadhaar: str, phone: str = "") -> tuple[bool, str]:
-    id_hash = hash_identity(aadhaar, phone)
-    aadhaar_hash = hash_identity(aadhaar, "")
-    # Check all stored identity hashes
-    for ns in ["identity_hash"]:
-        data = get_state(ns, user_id)  # only check current user's own hash
+    """Check if identity hash already exists for another user."""
+    # In production: check across all users in persistent state
+    # For MVP: return not duplicate (will add real check with persistent DB)
     return False, ""
 
 

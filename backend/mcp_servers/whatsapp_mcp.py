@@ -11,7 +11,6 @@ Uses Meta's WhatsApp Cloud API (free 1000 convos/month).
 Send messages via POST https://graph.facebook.com/v22.0/{phone_id}/messages
 """
 import os
-import json
 import time
 import base64
 import httpx
