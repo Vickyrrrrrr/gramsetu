@@ -252,10 +252,10 @@ def _initialize_tools(router: MCPToolRouter):
         """Strip all PII from text before logging/displaying."""
         return _redact_text(text)
 
-    async def audit_verify_identity(user_id: str, aadhaar: str, face_photo: str = "") -> dict:
-        """Verify user identity via Aadhaar checksum + optional face match."""
+    async def audit_verify_identity(user_id: str, aadhaar: str, face_photo: str = "", phone: str = "") -> dict:
+        """Verify user identity with Aadhaar + face match."""
         from backend.identity_verifier import verify_identity
-        return await verify_identity(user_id, aadhaar, face_photo)
+        return await verify_identity(user_id, aadhaar, face_photo, phone)
 
     router.register_direct("audit", "validate_field", "Validate a form field (Aadhaar, PAN, mobile, IFSC, etc.)", audit_validate_field)
     router.register_direct("audit", "redact_pii", "Strip PII from text", audit_redact_pii)
