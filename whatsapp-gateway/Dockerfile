@@ -2,6 +2,9 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+# Install git (required for npm dependencies with git:// URLs)
+RUN apk add --no-cache git
+
 # Install dependencies
 COPY package.json ./
 RUN npm install --production
