@@ -95,8 +95,9 @@ class GramSetuState(TypedDict, total=False):
     screenshot_path: str
     otp_field_position: dict    # {"x": int, "y": int}
 
-    # ── Timing ───────────────────────────────────────────────
-    last_active: float          # Unix timestamp of last user message
+    # ── Conversation Memory ────────────────────────────────────
+    conversation_history: list   # Last N exchanges [{role, text}]
+    last_collected_at: float     # Timestamp of last collect_data run
 
     # ── Audit ────────────────────────────────────────────────
     audit_entries: list         # Reasoning trail for this session

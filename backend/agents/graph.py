@@ -719,15 +719,29 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
         state.get("user_id", ""),
     )
 
-    # Try LLM extraction with context of already-collected data
+    # Build conversation history for LLM context
+    history = state.get("conversation_history", [])
+    history.append({"role": "user", "text": text})
+    if len(history) > 20:
+        history = history[-20:]  # Keep last 20 exchanges
+    state["conversation_history"] = history
+
+    # Try LLM extraction with context of already-collected data + history
     from backend.digilocker_client import extract_with_llm, _get_form_template
 
     existing_data = state.get("form_data", {})
     user_context = text if text else ""
 
     if user_context:
-        # Include existing data context so LLM knows what's already collected
-        context_with_history = f"ALREADY COLLECTED DATA: {json.dumps(existing_data, ensure_ascii=False)}\n\nNEW USER MESSAGE: {user_context}"
+        # Include conversation history AND existing data for full context
+        history_summary = "\n".join(
+            f"{h['role']}: {h['text'][:200]}" for h in history[-10:]
+        )
+        context_with_history = (
+            f"CONVERSATION HISTORY:\n{history_summary}\n\n"
+            f"ALREADY COLLECTED DATA: {json.dumps(existing_data, ensure_ascii=False)}\n\n"
+            f"NEW USER MESSAGE: {user_context}"
+        )
         extraction = await extract_with_llm(context_with_history, form_type)
         extracted = extraction.get("extracted_data", {})
         if extracted:
@@ -1121,6 +1135,17 @@ async def process_message(
     message_type: str = "text", language: str = "hi",
     form_type: str = "", session_id: Optional[str] = None,
 ) -> dict:
+    # ── Per-user rate limiting ────────────────────────────────
+    from backend.persistent_state import rate_check
+    allowed, remaining = rate_check("agent_calls", user_id, 20, 60)
+    if not allowed:
+        return {
+            "response": "⚠️ You're sending messages too fast. Please wait a moment.",
+            "status": "error",
+            "session_id": session_id,
+            "language": language,
+        }
+
     if not session_id:
         session_id = str(uuid.uuid4())
 
@@ -1288,6 +1313,7 @@ async def _process(compiled, user_id, user_phone, message, message_type,
         "missing_fields": [], "status": GraphStatus.ACTIVE.value,
         "current_node": "", "next_node": "transcribe",
         "response": "", "confirmation_summary": "",
+        "conversation_history": [], "last_collected_at": 0,
         "otp_value": "", "identity_verified": False,
         "challenge_otp": "", "challenge_otp_attempts": 0,
         "consent_confirmed": False,
