@@ -51,7 +51,7 @@ jobs:
           PYTHONPATH: .
         run: |
           if [ -d tests ] || [ -d backend/tests ]; then
-            pytest -q || pytest -q -k 'not integration' || true
+            python -m pytest tests/ -q --tb=short
           else
             echo "No tests present, skipping pytest"
           fi

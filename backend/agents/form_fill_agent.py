@@ -34,8 +34,6 @@ import json
 import time
 import asyncio
 import base64
-import tempfile
-import threading
 from typing import Optional, Literal
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -55,10 +53,10 @@ load_dotenv()
 # ── Config ────────────────────────────────────────────────
 NVIDIA_API_KEY = os.getenv("NVIDIA_API_KEY", "")
 NVIDIA_VLM_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-NVIDIA_VLM_MODEL = os.getenv("NVIDIA_VLM_MODEL", "meta/llama-3.2-90b-vision-instruct")
+NVIDIA_VLM_MODEL = os.getenv("NIM_MODEL_VISION", "meta/llama-3.2-11b-vision-instruct")
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_VISION_MODEL = os.getenv("GROQ_MODEL_VISION", "llama-3.2-11b-vision-preview")
+GROQ_VISION_MODEL = os.getenv("GROQ_MODEL_VISION", "meta-llama/llama-4-scout-17b-16e-instruct")
 
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
 _SARVAM_OK = bool(SARVAM_API_KEY and SARVAM_API_KEY not in ("", "your_sarvam_key_here"))
@@ -116,7 +114,7 @@ async def _analyze_with_nim_vision(
     language: str,
     page_context: str = "",
 ) -> FormFillAction:
-    """Analyze screenshot using NVIDIA NIM llama-3.2-90b-vision."""
+    """Analyze screenshot using NVIDIA NIM llama-3.2-11b-vision."""
     import httpx
 
     remaining = {k: v for k, v in form_data.items() if v}
@@ -138,7 +136,8 @@ async def _analyze_with_nim_vision(
 4. Check if there is an OTP/verification field.
 5. Check if the submit button is visible.
 
-Respond with ONLY valid JSON (no markdown):
+Respond with ONLY a valid JSON object. DO NOT include any conversational text, explanations, or markdown blocks. The response must start with '{' and end with '}'.
+
 {{
   "action": "fill_field" | "click_button" | "select_option" | "scroll_down" | "wait_for_page" | "done",
   "field": "field_name",
@@ -172,7 +171,7 @@ If nothing visible to fill, try scroll_down."""
                         "content": [
                             {"type": "text", "text": prompt},
                             {"type": "image_url", "image_url": {
-                                "url": f"data:image/png;base64,{screenshot_b64}"
+                                "url": f"data:image/jpeg;base64,{screenshot_b64}"
                             }},
                         ],
                     }],
@@ -181,9 +180,11 @@ If nothing visible to fill, try scroll_down."""
                 },
             )
         if response.status_code != 200:
+            print(f"[FormFill] NVIDIA Error {response.status_code}: {response.text}")
             return FormFillAction(action="wait_for_page", error=f"HTTP {response.status_code}")
 
         content = response.json()["choices"][0]["message"]["content"]
+        print(f"[FormFill] NVIDIA Response: {content[:200]}...")
         return _parse_action_response(content)
     except Exception as e:
         return FormFillAction(action="wait_for_page", error=str(e))
@@ -228,7 +229,7 @@ Return JSON:
                 json={
                     "image": screenshot_b64,
                     "prompt": prompt,
-                    "model": "sarvam-vision-1",
+                    "model": "sarvam-v1",
                 },
             )
         if response.status_code == 200:
@@ -268,7 +269,7 @@ Return JSON with action, field, value, label, page_phase, done, otp_detected, co
                         "content": [
                             {"type": "text", "text": prompt},
                             {"type": "image_url", "image_url": {
-                                "url": f"data:image/png;base64,{screenshot_b64}"
+                                "url": f"data:image/jpeg;base64,{screenshot_b64}"
                             }},
                         ],
                     }],
@@ -278,69 +279,52 @@ Return JSON with action, field, value, label, page_phase, done, otp_detected, co
             )
         if response.status_code == 200:
             content = response.json()["choices"][0]["message"]["content"]
+            print(f"[FormFill] Groq Response: {content[:200]}...")
             return _parse_action_response(content)
+        else:
+            print(f"[FormFill] Groq Error {response.status_code}: {response.text}")
     except Exception:
         pass
     return FormFillAction(action="wait_for_page", error="groq_failed")
 
 
 def _parse_action_response(raw: str) -> FormFillAction:
-    """Parse JSON from VLM response."""
+    """Parse JSON from VLM response with high tolerance."""
     try:
         import re
-        # Extract JSON from possible markdown code blocks
-        if "```" in raw:
-            parts = raw.split("```")
-            for part in parts:
-                stripped = part.strip()
-                if stripped.startswith("json"):
-                    stripped = stripped[4:].strip()
-                if stripped.startswith("{") and stripped.endswith("}"):
-                    parsed = json.loads(stripped)
-                    return FormFillAction(
-                        action=parsed.get("action", "wait_for_page"),
-                        field=parsed.get("field"),
-                        value=parsed.get("value"),
-                        label=parsed.get("label"),
-                        page_phase=parsed.get("page_phase", "unknown"),
-                        done=parsed.get("done", False),
-                        otp_detected=parsed.get("otp_detected", False),
-                        otp_field_position=parsed.get("otp_field_position"),
-                        confidence=parsed.get("confidence", 0.5),
-                        reasoning=parsed.get("reasoning", ""),
-                    )
-            # Try finding JSON anywhere in the response
-            m = re.search(r'\{.*\}', raw, re.DOTALL)
-            if m:
-                parsed = json.loads(m.group(0))
+        # Find anything that looks like JSON { ... } or [ { ... } ]
+        m = re.search(r'(\[?\s*\{.*\}\s*\]?)', raw, re.DOTALL)
+        if m:
+            json_str = m.group(1).strip()
+            parsed = json.loads(json_str)
+            
+            # If it's a list, take the first item
+            if isinstance(parsed, list) and len(parsed) > 0:
+                parsed = parsed[0]
+            
+            if isinstance(parsed, dict):
+                # Map common action variations
+                act = str(parsed.get("action", "wait_for_page")).lower()
+                if act in ["fill", "type", "input"]: act = "fill_field"
+                if act in ["click", "press", "tap"]: act = "click_button"
+                if act in ["select", "choose", "dropdown"]: act = "select_option"
+                
                 return FormFillAction(
-                    action=parsed.get("action", "wait_for_page"),
+                    action=act,
                     field=parsed.get("field"),
                     value=parsed.get("value"),
                     label=parsed.get("label"),
                     page_phase=parsed.get("page_phase", "unknown"),
                     done=parsed.get("done", False),
-                    otp_detected=parsed.get("otp_detected", False),
+                    otp_detected=parsed.get("otp_detected", False) or parsed.get("otp", False),
                     otp_field_position=parsed.get("otp_field_position"),
-                    confidence=parsed.get("confidence", 0.5),
+                    confidence=parsed.get("confidence", 0.8),
                     reasoning=parsed.get("reasoning", ""),
                 )
-        else:
-            parsed = json.loads(raw.strip())
-            return FormFillAction(
-                action=parsed.get("action", "wait_for_page"),
-                field=parsed.get("field"),
-                value=parsed.get("value"),
-                label=parsed.get("label"),
-                page_phase=parsed.get("page_phase", "unknown"),
-                done=parsed.get("done", False),
-                otp_detected=parsed.get("otp_detected", False),
-                otp_field_position=parsed.get("otp_field_position"),
-                confidence=parsed.get("confidence", 0.5),
-                reasoning=parsed.get("reasoning", ""),
-            )
     except Exception as e:
-        return FormFillAction(action="wait_for_page", error=f"parse_error: {e}")
+        print(f"[FormFill] Parse Error: {e} | Raw: {raw[:200]}")
+    
+    return FormFillAction(action="wait_for_page", error="parse_failed")
 
 
 async def analyze_portal_screenshot(
@@ -352,17 +336,10 @@ async def analyze_portal_screenshot(
 ) -> FormFillAction:
     """
     Analyze a portal screenshot and decide the next action.
-    Priority: Sarvam Vision → NVIDIA NIM → Groq Vision → fallback.
+    Vision priority: NVIDIA NIM → Groq Vision → heuristic fallback.
+    (Sarvam Vision temporarily skipped — insufficient quality)
     """
-    # 1. Sarvam Vision (India-trained, excellent for Indic portals)
-    if _SARVAM_OK:
-        result = await _analyze_with_sarvam_vision(
-            screenshot_b64, form_data, form_type, language, page_context
-        )
-        if not result.error or result.error == "sarvam_failed":
-            return result
-
-    # 2. NVIDIA NIM Vision (Fallback, high quality)
+    # 1. NVIDIA NIM Vision (PRIMARY — llama-3.2-11b-vision-instruct, free tier)
     if NVIDIA_API_KEY and NVIDIA_API_KEY != "nvapi-your-key-here":
         result = await _analyze_with_nim_vision(
             screenshot_b64, form_data, form_type, language, page_context
@@ -370,12 +347,20 @@ async def analyze_portal_screenshot(
         if not result.error:
             return result
 
-    # 3. Groq Vision (Secondary fallback)
+    # 2. Groq Vision (FALLBACK — llama-3.2-11b-vision-preview)
     if GROQ_API_KEY:
         result = await _analyze_with_groq_vision(
             screenshot_b64, form_data, form_type, language
         )
         if not result.error:
+            return result
+
+    # 3. Sarvam Vision (BACKUP — India-specific, lower quality)
+    if _SARVAM_OK:
+        result = await _analyze_with_sarvam_vision(
+            screenshot_b64, form_data, form_type, language, page_context
+        )
+        if not result.error or result.error == "sarvam_failed":
             return result
 
     # 4. Heuristic fallback (no VLM)
@@ -462,6 +447,7 @@ async def _playwright_fill(
                 "screenshot": frame_b64,
                 "step": step,
                 "progress": progress,
+                "portal_url": portal_url,
             })
             for key in {session_id, user_id_for_ws}:
                 if not key:
@@ -481,230 +467,232 @@ async def _playwright_fill(
         except Exception:
             pass
 
-    # ── Thread-safe async event loop ─────────────────
-    _pw_result: dict = {"error": None, "final_screenshot": "", "final_path": ""}
+    # ── Core Fill Logic ────────────────────────────────────
+    ss_path = os.path.join(screenshot_dir, f"{form_type}_{session_id}.png")
 
-    def _run_sync():
-        loop = _aio.new_event_loop()
-        _aio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(_do_fill())
-        finally:
-            loop.close()
+    try:
+        # Initial status broadcast
+        await _broadcast("loading", "Starting Browser...", 0.0)
 
-    async def _do_fill():
-        nonlocal remaining_data, result
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 900},
+                locale="hi-IN",
+                timezone_id="Asia/Kolkata",
+            )
+            page = await context.new_page()
+            page.on("dialog", lambda d: asyncio.ensure_future(d.dismiss()))
 
-        ss_path = os.path.join(screenshot_dir, f"{form_type}_{session_id}.png")
+            try:
+                await _broadcast("loading", f"Navigating to {portal_url}...", 0.0)
+                # Use domcontentloaded for faster loading of mock portals (avoids timeout on fonts)
+                await page.goto(portal_url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(2000) 
 
-        try:
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(
-                    headless=True,
-                    args=["--no-sandbox", "--disable-dev-shm-usage"],
-                )
-                context = await browser.new_context(
-                    viewport={"width": 1280, "height": 900},
-                    locale="hi-IN",
-                    timezone_id="Asia/Kolkata",
-                )
-                page = await context.new_page()
-                page.on("dialog", lambda d: _aio.ensure_future(d.dismiss()))
-
-                try:
-                    await page.goto(portal_url, wait_until="commit", timeout=60000)
-                    await page.wait_for_timeout(3000) # Give JS a moment to render
-                except Exception as e:
-                    print(f"[FormFill] Navigation failed to {portal_url}: {e}")
-                    # Fallback retry with longer timeout
-                    await page.goto(portal_url, wait_until="load", timeout=90000)
-
-                # Take initial screenshot
-                try:
-                    ss_bytes = await page.screenshot(type="jpeg", quality=60)
-                    b64 = base64.b64encode(ss_bytes).decode()
-                    await _broadcast(b64, "Portal loaded", 0.0)
-                except Exception:
-                    b64 = ""
-
-                # Agent loop
-                steps_taken = 0
-                page_context = ""
-                filled_count = 0
-                scroll_count = 0
-                stuck_count = 0
-                last_action = None
-
-                while steps_taken < max_steps:
-                    steps_taken += 1
-
-                    # ── Check for Cancellation Signal ─────────
-                    if _cancel_signals.get(session_id):
-                        print(f"[FormFill] Session {session_id[:8]}... ABORTED by user.")
-                        _cancel_signals.pop(session_id, None)
-                        break
-
-                    # ── Analyze with VLM ──────────────────
+                # Auto-dismiss common popups (like cookie policies)
+                for label in ["Accept All Cookies", "Accept", "सहमति दें", "ठीक है", "Close", "बंद करें"]:
                     try:
-                        ss_bytes = await page.screenshot(type="jpeg", quality=50)
-                        b64 = base64.b64encode(ss_bytes).decode()
-                        _screenshot_cache[session_id] = b64
-                    except Exception as e:
-                        b64 = ""
-                        print(f"[FormFill] Screenshot failed: {e}")
+                        btn = page.get_by_text(label, exact=False).first
+                        if await btn.count() > 0 and await btn.is_visible():
+                            await btn.click(timeout=2000)
+                            await page.wait_for_timeout(500)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[FormFill] Navigation warning (retrying): {e}")
+                # Fallback: try localhost if 127.0.0.1 failed
+                alt_url = portal_url.replace("127.0.0.1", "localhost")
+                await page.goto(alt_url, wait_until="load", timeout=45000)
 
-                    action = await analyze_portal_screenshot(
-                        b64, remaining_data, form_type, language, page_context
-                    )
+            # Take initial screenshot
+            try:
+                ss_bytes = await page.screenshot(type="jpeg", quality=60)
+                b64 = base64.b64encode(ss_bytes).decode()
+                await _broadcast(b64, "Portal loaded", 0.0)
+            except Exception:
+                b64 = ""
 
-                    if action.error:
-                        action.action = "wait_for_page"
+            # Agent loop
+            steps_taken = 0
+            page_context = ""
+            filled_count = 0
+            scroll_count = 0
+            stuck_count = 0
+            last_action = None
+            while steps_taken < max_steps:
+                steps_taken += 1
 
-                    # ── Execute Action ─────────────────────
-                    if action.action == "done" or action.done:
-                        result.success = True
-                        result.fields_filled = filled_count
-                        result.steps_taken = steps_taken
+                # ── Check for Cancellation Signal ─────────
+                if _cancel_signals.get(session_id):
+                    print(f"[FormFill] Session {session_id[:8]}... ABORTED by user.")
+                    _cancel_signals.pop(session_id, None)
+                    break
+
+                # ── Analyze with VLM ──────────────────
+                try:
+                    ss_bytes = await page.screenshot(type="jpeg", quality=50)
+                    b64 = base64.b64encode(ss_bytes).decode()
+                    _screenshot_cache[session_id] = b64
+                except Exception as e:
+                    b64 = ""
+                    print(f"[FormFill] Screenshot failed: {e}")
+
+                action = await analyze_portal_screenshot(
+                    b64, remaining_data, form_type, language, page_context
+                )
+
+                if action.error:
+                    action.action = "wait_for_page"
+
+                # ── Execute Action ─────────────────────
+                if action.action == "done" or action.done:
+                    result.success = True
+                    result.fields_filled = filled_count
+                    result.steps_taken = steps_taken
+                    try:
+                        await page.click("#declaration", timeout=2000)
+                        await page.click("#send-otp-btn", timeout=2000)
+                    except Exception:
+                        pass
+                    break
+
+                elif action.action == "fill_field" and action.field:
+                    field_name = action.field
+                    field_value = action.value or remaining_data.get(field_name, "")
+
+                    if not field_value:
+                        remaining_data.pop(field_name, None)
+                        continue
+
+                    # Prioritize the label the AI actually saw on the screen
+                    field_labels = []
+                    if action.label:
+                        field_labels.append(action.label)
+                    
+                    # Fallback to pre-defined labels from the registry
+                    registry_labels = get_field_labels(form_type, field_name)
+                    for rl in registry_labels:
+                        if rl not in field_labels:
+                            field_labels.append(rl)
+                    
+                    filled = False
+
+                    for label in field_labels:
                         try:
-                            await page.click("#declaration", timeout=2000)
-                            await page.click("#send-otp-btn", timeout=2000)
+                            locator = page.get_by_label(label).first
+                            if await locator.count() > 0:
+                                await locator.scroll_into_view_if_needed()
+                                await locator.click(timeout=1000)
+                                await page.wait_for_timeout(200)
+                                await locator.fill("")
+                                await locator.type(field_value, delay=40)
+                                await page.wait_for_timeout(300)
+                                filled = True
+                                filled_count += 1
+                                remaining_data.pop(field_name, None)
+                                stuck_count = 0
+                                break
                         except Exception:
                             pass
+
+                    if filled:
+                        progress = filled_count / max(len(form_data), 1)
+                        try:
+                            ss_bytes = await page.screenshot(type="jpeg", quality=50)
+                            await _broadcast(
+                                base64.b64encode(ss_bytes).decode(),
+                                f"Filled: {field_name}",
+                                progress,
+                            )
+                        except Exception:
+                            pass
+
+                elif action.action == "click_button":
+                    # Priority labels including popups
+                    button_labels = [
+                        "Accept All Cookies", "Accept", "OK", "Close", "Dismiss", "X", "Close Window",
+                        "सहमति दें", "ठीक है", "बंद करें", "हटाएं",
+                        "Submit", "जमा करें", "Apply", "आवेदन करें",
+                        "Register", "Proceed", "Next", "Continue"
+                    ]
+                    if action.label:
+                        button_labels.insert(0, action.label)
+                    for bl in button_labels:
+                        try:
+                            btn = page.get_by_role("button", name=bl).first
+                            if await btn.count() > 0:
+                                await btn.click(timeout=1000)
+                                await page.wait_for_timeout(1500)
+                                break
+                        except Exception:
+                            pass
+
+                elif action.action == "scroll_down":
+                    scroll_count += 1
+                    if scroll_count > 5:
                         break
+                    await page.evaluate("window.scrollBy(0, 400)")
+                    await page.wait_for_timeout(500)
 
-                    elif action.action == "fill_field" and action.field:
-                        field_name = action.field
-                        field_value = action.value or remaining_data.get(field_name, "")
+                elif action.action == "select_option" and action.field and action.value:
+                    field_labels = get_field_labels(form_type, action.field)
+                    for label in field_labels:
+                        try:
+                            sel = page.get_by_label(label).first
+                            if await sel.count() > 0:
+                                await sel.select_option(action.value, timeout=1000)
+                                filled_count += 1
+                                break
+                        except Exception:
+                            pass
 
-                        if not field_value:
-                            remaining_data.pop(field_name, None)
-                            continue
+                elif action.action == "wait_for_page":
+                    await page.wait_for_timeout(1000)
 
-                        field_labels = get_field_labels(form_type, field_name)
-                        filled = False
-
-                        for label in field_labels:
-                            try:
-                                locator = page.get_by_label(label).first
-                                if await locator.count() > 0:
-                                    await locator.scroll_into_view_if_needed()
-                                    await locator.click(timeout=1000)
-                                    await page.wait_for_timeout(200)
-                                    await locator.fill("")
-                                    await locator.type(field_value, delay=40)
-                                    await page.wait_for_timeout(300)
-                                    filled = True
-                                    filled_count += 1
-                                    remaining_data.pop(field_name, None)
-                                    stuck_count = 0
-                                    break
-                            except Exception:
-                                pass
-
-                        if filled:
-                            progress = filled_count / max(len(form_data), 1)
-                            try:
-                                ss_bytes = await page.screenshot(type="jpeg", quality=50)
-                                await _broadcast(
-                                    base64.b64encode(ss_bytes).decode(),
-                                    f"Filled: {field_name}",
-                                    progress,
-                                )
-                            except Exception:
-                                pass
-
-                    elif action.action == "click_button":
-                        # Priority labels including popups
-                        button_labels = [
-                            "Accept All Cookies", "Accept", "OK", "Close", "Dismiss", "X", "Close Window",
-                            "सहमति दें", "ठीक है", "बंद करें", "हटाएं",
-                            "Submit", "जमा करें", "Apply", "आवेदन करें",
-                            "Register", "Proceed", "Next", "Continue"
-                        ]
-                        if action.label:
-                            button_labels.insert(0, action.label)
-                        for bl in button_labels:
-                            try:
-                                btn = page.get_by_role("button", name=bl).first
-                                if await btn.count() > 0:
-                                    await btn.click(timeout=1000)
-                                    await page.wait_for_timeout(1500)
-                                    break
-                            except Exception:
-                                pass
-
-                    elif action.action == "scroll_down":
-                        scroll_count += 1
-                        if scroll_count > 5:
-                            break
+                # Stuck detection
+                if action.action == last_action:
+                    stuck_count += 1
+                    if stuck_count > 3:
                         await page.evaluate("window.scrollBy(0, 400)")
-                        await page.wait_for_timeout(500)
-
-                    elif action.action == "select_option" and action.field and action.value:
-                        field_labels = get_field_labels(form_type, action.field)
-                        for label in field_labels:
-                            try:
-                                sel = page.get_by_label(label).first
-                                if await sel.count() > 0:
-                                    await sel.select_option(action.value, timeout=1000)
-                                    filled_count += 1
-                                    break
-                            except Exception:
-                                pass
-
-                    elif action.action == "wait_for_page":
-                        await page.wait_for_timeout(1000)
-
-                    # Stuck detection
-                    if action.action == last_action:
-                        stuck_count += 1
-                        if stuck_count > 3:
-                            await page.evaluate("window.scrollBy(0, 400)")
-                            stuck_count = 0
-                    else:
                         stuck_count = 0
-                    last_action = action.action
+                else:
+                    stuck_count = 0
+                last_action = action.action
 
-                    result.actions.append(action)
-                    page_context = action.page_phase
-
-                # ── Final State ────────────────────────────
-                try:
-                    final_ss = await page.screenshot(type="jpeg", quality=70)
-                    result.screenshot_b64 = base64.b64encode(final_ss).decode()
-                    await page.screenshot(path=ss_path, full_page=False)
-                    result.screenshot_path = ss_path
-                    await _broadcast(result.screenshot_b64, "complete", 1.0)
-                except Exception as e:
-                    print(f"[FormFill] Final screenshot: {e}")
-
-                # Check for OTP page
-                otp_keywords = ["otp", "verification", "सत्यापन", "कोड", "one-time"]
-                try:
-                    content = await page.content()
-                    if any(k in content.lower() for k in otp_keywords):
-                        result.otp_detected = True
-                except Exception:
-                    pass
-
-                await browser.close()
-                result.fields_filled = filled_count
+                result.actions.append(action)
                 result.steps_taken = steps_taken
+                page_context = action.page_phase
+                
+                # Small pause to prevent rate limits and allow browser to settle
+                await page.wait_for_timeout(2000)
 
-        except Exception as e:
-            result.error = str(e)
-            print(f"[FormFill] Error: {e}")
+            # ── Final State ────────────────────────────
+            try:
+                final_ss = await page.screenshot(type="jpeg", quality=70)
+                result.screenshot_b64 = base64.b64encode(final_ss).decode()
+                await page.screenshot(path=ss_path, full_page=False)
+                result.screenshot_path = ss_path
+                await _broadcast(result.screenshot_b64, "complete", 1.0)
+            except Exception as e:
+                print(f"[FormFill] Final screenshot: {e}")
 
-    thread = threading.Thread(target=_run_sync, daemon=True)
-    thread.start()
-    thread.join(timeout=120)
+            # Check for OTP page
+            otp_keywords = ["otp", "verification", "सत्यापन", "कोड", "one-time"]
+            try:
+                content = await page.content()
+                if any(k in content.lower() for k in otp_keywords):
+                    result.otp_detected = True
+            except Exception:
+                pass
 
-    if _pw_result.get("error"):
-        result.error = _pw_result.get("error")
-    if _pw_result.get("final_screenshot"):
-        result.screenshot_b64 = _pw_result["final_screenshot"]
-    if _pw_result.get("final_path"):
-        result.screenshot_path = _pw_result["final_path"]
+            await browser.close()
+    except Exception as e:
+        result.error = str(e)
+        print(f"[FormFill] Error: {e}")
 
     return result
 

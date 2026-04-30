@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.param_functions import File
 
-from backend.llm_client import transcribe_audio_sarvam, transcribe_audio_groq, transcribe_audio_nvidia
+from backend.llm_client import transcribe_audio_sarvam, transcribe_audio_groq
 
 router = APIRouter(tags=["voice"])
 
@@ -25,8 +25,6 @@ async def voice_transcribe(audio: UploadFile = File(...)):
         text = await transcribe_audio_sarvam(tmp_path)
         if not text:
             text = await transcribe_audio_groq(tmp_path)
-        if not text:
-            text = await transcribe_audio_nvidia(tmp_path)
         if not text:
             raise HTTPException(status_code=500, detail="Transcription failed")
         return JSONResponse({"text": text})

@@ -29,6 +29,7 @@ PORTAL_URLS: dict[str, str] = {
     "pm_kisan":           "http://127.0.0.1:8000/mock/ration_card.html",
     "kisan_credit_card": "http://127.0.0.1:8000/mock/ration_card.html",
     "jan_dhan":           "http://127.0.0.1:8000/mock/pension.html",
+    "generic":            "http://127.0.0.1:8000/mock/ration_card.html",
 }
 
 # ── Portal Names ──────────────────────────────────────────
@@ -45,6 +46,7 @@ PORTAL_NAMES: dict[str, str] = {
     "pm_kisan":           "PM-KISAN - Farmer Support Scheme",
     "kisan_credit_card": "KCC - Kisan Credit Card Portal",
     "jan_dhan":           "PMJDY - Jan Dhan Yojana",
+    "generic":            "Generic Government Portal",
 }
 
 # ── Semantic Field Mappings ────────────────────────────────

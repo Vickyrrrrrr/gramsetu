@@ -1,23 +1,25 @@
-"""Prometheus instrumentation for FastAPI."""
+"""Prometheus instrumentation for FastAPI. Falls back gracefully if not installed."""
 from __future__ import annotations
 import time
-
 from fastapi import Response
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
-REQUEST_COUNT = Counter(
-    "gramsetu_http_requests_total",
-    "Total HTTP requests",
-    ["method", "path", "status"],
-)
-REQUEST_LATENCY = Histogram(
-    "gramsetu_http_request_duration_seconds",
-    "HTTP request latency",
-    ["method", "path"],
-)
+try:
+    from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+    _OK = True
+except ImportError:
+    _OK = False
+
+if _OK:
+    REQUEST_COUNT = Counter("gramsetu_http_requests_total", "Total HTTP requests", ["method", "path", "status"])
+    REQUEST_LATENCY = Histogram("gramsetu_http_request_duration_seconds", "HTTP request latency", ["method", "path"])
+else:
+    REQUEST_COUNT = None
+    REQUEST_LATENCY = None
 
 
 def instrument_fastapi(app):
+    if not _OK:
+        return
     @app.middleware("http")
     async def _metrics_middleware(request, call_next):
         start = time.perf_counter()

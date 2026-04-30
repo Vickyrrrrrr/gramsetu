@@ -1,25 +1,31 @@
-name: Deploy Production
+name: Deploy to VPS
 
 on:
   workflow_run:
-    workflows: ["Docker Publish"]
+    workflows: ["CI"]
     types: [completed]
     branches: ["main"]
   workflow_dispatch:
 
 concurrency:
-  group: deploy-production
+  group: deploy-vps
   cancel-in-progress: true
 
 jobs:
   deploy:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
-      - name: Deployment mode notice
-        run: |
-          echo "GitHub deploy over SSH disabled."
-          echo "This repository is deployed on Railway, so SSH-based server deployment is not required."
-          echo "Use Railway's GitHub integration or add a Railway-specific deploy action later if needed."
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ubuntu
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/Gramsetu
+            git pull origin main
+            docker compose up -d --build --remove-orphans
+            docker logs gramsetu-backend --tail 10

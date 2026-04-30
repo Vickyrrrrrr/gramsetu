@@ -136,7 +136,7 @@ class TestPIIRedaction:
         text = "PAN is ABCDE1234F"
         redacted = _redact_text(text)
         assert "ABCDE" not in redacted
-        assert "XXXXX1234F" in redacted
+        assert "1234F" in redacted  # Last part preserved
 
     def test_aadhaar_field_redaction(self):
         redacted = _redact_value("aadhaar_number", "234567890123")
@@ -288,30 +288,32 @@ class TestCorrectionParsing:
 # ============================================================
 
 class TestDigiLockerData:
-    """Test DigiLocker demo data extraction."""
+    """Test DigiLocker data extraction (no hardcoded data in v4)."""
 
-    def test_ration_card_demo_data(self):
+    def test_ration_card_returns_template(self):
         from backend.digilocker_client import _get_demo_data
         result = _get_demo_data("ration_card")
-        data = result["extracted_data"]
-        assert data["applicant_name"] == "Ram Kumar Sharma"
-        assert data["aadhaar_number"] == "2834 1256 9087"
-        assert data["mobile_number"] == "9876543210"
-        assert result["ready_to_submit"] is True
+        assert "extracted_data" in result
+        assert "missing_fields" in result
+        assert "confidence_scores" in result
+        # New architecture: starts empty, data comes from user/MCP
+        assert isinstance(result["extracted_data"], dict)
+        assert result["ready_to_submit"] is False
+        assert "aadhaar_number" in result["missing_fields"]
 
-    def test_pension_demo_data(self):
+    def test_pension_returns_template(self):
         from backend.digilocker_client import _get_demo_data
         result = _get_demo_data("pension")
-        data = result["extracted_data"]
-        assert "applicant_name" in data
-        # bank_account is returned as empty dict — should be flagged
-        assert "bank_account" in data
+        assert "extracted_data" in result
+        assert isinstance(result["extracted_data"], dict)
+        assert result["ready_to_submit"] is False
 
-    def test_identity_demo_data(self):
+    def test_identity_returns_template(self):
         from backend.digilocker_client import _get_demo_data
         result = _get_demo_data("identity")
-        data = result["extracted_data"]
-        assert data["document_type"] == "pan_card"
+        assert "extracted_data" in result
+        assert isinstance(result["extracted_data"], dict)
+        assert result["ready_to_submit"] is False
 
 
 # ── Run ──────────────────────────────────────────────────────

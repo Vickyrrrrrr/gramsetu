@@ -23,6 +23,7 @@ from backend.security import api_limiter, sanitize_input, validate_otp_input
 from backend.schemes import discover_schemes
 from lib.language_utils import detect_language
 from lib.voice_handler import transcribe_audio
+from backend.api.routes.whatsapp import router as whatsapp_router
 
 _user_sessions: dict[str, dict] = {}
 _completed_forms: dict[str, dict] = {}
@@ -45,6 +46,7 @@ STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # Specific mount for mock portals (DEMO MODE)
 app.mount("/mock", StaticFiles(directory=os.path.join(STATIC_DIR, "backend", "static", "mock_portals")), name="mock")
+app.include_router(whatsapp_router)
 
 # ── Startup ─────────────────────────────────────────────
 @app.on_event("startup")
@@ -57,8 +59,10 @@ async def startup():
         print("[DB] Supabase not configured - skipping database (prototype mode)")
     except Exception as e:
         print(f"[DB] Database warning: {e}")
-    from backend.llm_client import _groq_ok, _nim_ok, GROQ_MODEL_MAIN
-    print(f"\nGramSetu API | Groq: {'OK' if _groq_ok() else 'NO KEY'} | NIM: {'OK' if _nim_ok() else 'NO KEY'}")
+    from backend.llm_client import _groq_ok, _nim_ok, _sarvam_ok, GROQ_MODEL_MAIN
+    print(f"\nGramSetu API | Chat: {'OK Sarvam' if _sarvam_ok() else 'NO KEY'} | Groq: {'OK' if _groq_ok() else 'NO KEY'} "
+          f"| NVIDIA: {'OK' if _nim_ok() else 'NO KEY'} | Sarvam STT/TTS: {'OK' if _sarvam_ok() else 'NO KEY'}")
+    print(f"Chat/Intent: Groq {GROQ_MODEL_MAIN} | Vision: NVIDIA | STT/TTS: Sarvam")
     print(f"API Docs: http://localhost:{os.getenv('PORT','8000')}/docs\n")
 
 # ── Core processor ───────────────────────────────────────
@@ -149,13 +153,10 @@ async def voice_input(request: Request):
     tmp.close()
     
     try:
-        # Use llm_client functions (Sarvam -> Groq -> NVIDIA)
-        from backend.llm_client import transcribe_audio_sarvam, transcribe_audio_groq, transcribe_audio_nvidia
+        from backend.llm_client import transcribe_audio_sarvam, transcribe_audio_groq
         text = await transcribe_audio_sarvam(tmp.name)
         if not text:
             text = await transcribe_audio_groq(tmp.name)
-        if not text:
-            text = await transcribe_audio_nvidia(tmp.name)
     except Exception as e:
         print(f"[Voice] Transcription error: {e}")
         text = ""
@@ -261,7 +262,7 @@ async def voice_output(request: Request):
     from lib.voice_handler import generate_voice
     audio_bytes = await generate_voice(text, lang)
     if not audio_bytes:
-        raise HTTPException(status_code=500, detail="TTS generation failed")
+        raise HTTPException(status_code=500, detail="TTS generation failed — all providers unavailable")
     
     from fastapi.responses import Response
     return Response(content=audio_bytes, media_type="audio/wav")
@@ -338,7 +339,31 @@ async def health():
 @app.get("/api/mcp-status")
 async def mcp_status():
     from backend.llm_client import _groq_ok, _nim_ok
-    return JSONResponse({"groq": "configured" if _groq_ok() else "missing_key", "nvidia": "configured" if _nim_ok() else "missing_key", "digilocker": "mock", "timestamp": __import__("datetime").datetime.now().isoformat()})
+    import httpx
+    import asyncio
+
+    async def check_port(port: int) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as c:
+                r = await c.get(f"http://127.0.0.1:{port}/health")
+                return r.status_code == 200
+        except Exception:
+            return False
+
+    browser_ok = await check_port(8101)
+    audit_ok = await check_port(8102)
+    digilocker_ok = await check_port(8103)
+    whatsapp_ok = await check_port(8104)
+
+    return JSONResponse({
+        "groq": "configured" if _groq_ok() else "missing_key",
+        "nvidia": "configured" if _nim_ok() else "missing_key",
+        "browser": browser_ok,
+        "audit": audit_ok,
+        "digilocker": digilocker_ok,
+        "whatsapp": whatsapp_ok,
+        "timestamp": __import__("datetime").datetime.now().isoformat(),
+    })
 
 # ── Receipt ──────────────────────────────────────────────
 @app.get("/api/receipt/{session_id}")

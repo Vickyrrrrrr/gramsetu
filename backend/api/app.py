@@ -34,6 +34,7 @@ from backend.api.routes.voice import router as voice_router
 from backend.api.routes.voice_realtime import router as voice_realtime_router
 from backend.api.routes.chat import router as chat_router
 from backend.api.routes.services import router as services_router
+from backend.api.routes.whatsapp import router as whatsapp_router
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -111,6 +112,7 @@ app.include_router(voice_router)
 app.include_router(voice_realtime_router)
 app.include_router(chat_router)
 app.include_router(services_router)
+app.include_router(whatsapp_router)
 
 
 # ---------------------------------------------------------------------------
@@ -129,45 +131,46 @@ async def startup():
     except Exception as e:
         print(f"[Cache] cache unavailable: {e}")
 
-    from backend.llm_client import _groq_ok, _nim_ok, GROQ_MODEL_MAIN
-    groq_status   = "OK Groq"   if _groq_ok() else "NO KEY Groq"
-    nvidia_status = "OK NVIDIA" if _nim_ok()  else "NO KEY NVIDIA"
+    from backend.llm_client import _groq_ok, _nim_ok, _sarvam_ok, GROQ_MODEL_MAIN
+    groq_status   = "OK Groq"   if _groq_ok()   else "NO KEY Groq"
+    nvidia_status = "OK NVIDIA" if _nim_ok()    else "NO KEY NVIDIA"
+    sarvam_status = "OK Sarvam" if _sarvam_ok() else "NO KEY Sarvam"
     port = os.getenv("PORT", "8000")
 
     print("\n" + "=" * 60)
-    print("  GramSetu v3 -- Web API Server")
+    print("  GramSetu v4 — AI Form Assistant")
     print("=" * 60)
-    print(f"  LLM:        {groq_status} ({GROQ_MODEL_MAIN})")
-    print(f"  Vision/ASR: {nvidia_status}")
-    print(f"  ASR:        Groq whisper-large-v3 -> NVIDIA parakeet")
-    print(f"  TTS:        edge-tts (11 Indian languages, free)")
-    print(f"  DigiLocker: Mock (see DIGILOCKER_INTEGRATION.md for real API)")
-    print(f"  Gov Portal: Mock (Playwright)")
+    print(f"  Chat/Intent: {sarvam_status} (sarvam-m, India-optimized)")
+    print(f"  Fallback:     {groq_status} ({GROQ_MODEL_MAIN})")
+    print(f"  Vision:       {nvidia_status}")
+    print(f"  STT/TTS:      {sarvam_status} (saaras:v3 + bulbul:v3)")
+    print(f"  MCP:         4 servers (Browser + Audit + DigiLocker + WhatsApp)")
     print("-" * 60)
-    print(f"  API Docs:   http://localhost:{port}/docs")
-    print(f"  Chat:       POST /api/chat")
-    print(f"  Voice:      POST /api/voice")
-    print(f"  OTP:        POST /api/otp/{{user_id}}")
-    print(f"  Schemes:    POST /api/schemes")
-    print(f"  Impact:     GET  /api/impact")
+    print(f"  API Docs:    http://localhost:{port}/docs")
+    print(f"  Chat:        POST /api/chat")
+    print(f"  Voice:       POST /api/voice")
+    print(f"  Realtime:    WS  /api/voice/realtime")
     print("=" * 60 + "\n")
+
+    # Start MCP servers on startup
+    _start_mcp_servers()
 
 
 @app.on_event("shutdown")
 async def shutdown():
     await close_cache()
 
-    _start_mcp_servers()
-
 
 def _start_mcp_servers():
     """Start all 4 MCP tool servers as background daemon threads."""
     import threading
+    import asyncio
 
     mcp_configs = [
-        ("Audit",      "backend.mcp_servers.audit_mcp",      int(os.getenv("MCP_AUDIT_PORT",      "8102"))),
         ("Browser",    "backend.mcp_servers.browser_mcp",    int(os.getenv("MCP_BROWSER_PORT",    "8101"))),
+        ("Audit",      "backend.mcp_servers.audit_mcp",      int(os.getenv("MCP_AUDIT_PORT",      "8102"))),
         ("DigiLocker", "backend.mcp_servers.digilocker_mcp", int(os.getenv("MCP_DIGILOCKER_PORT", "8103"))),
+        ("WhatsApp",   "backend.mcp_servers.whatsapp_mcp",   int(os.getenv("MCP_WHATSAPP_PORT",   "8104"))),
     ]
 
     def _run_mcp(name: str, module: str, port: int):
@@ -175,16 +178,18 @@ def _start_mcp_servers():
             import importlib
             mod = importlib.import_module(module)
             mcp_server = getattr(mod, "mcp", None)
-            if mcp_server and hasattr(mcp_server, "run"):
-                print(f"[MCP] {name} starting on :{port}")
-                mcp_server.run(transport="streamable-http", host="127.0.0.1", port=port)
+            if mcp_server is None:
+                print(f"[MCP] {name}: no 'mcp' object found in {module}")
+                return
+            print(f"[MCP] {name} starting on :{port}")
+            mcp_server.run(transport="streamable-http", host="0.0.0.0", port=port)
         except Exception as e:
             print(f"[MCP] {name} failed: {e}")
 
     for name, module, port in mcp_configs:
         threading.Thread(target=_run_mcp, args=(name, module, port), daemon=True).start()
 
-    print("[MCP] 3 servers: Browser :8101 | Audit :8102 | DigiLocker :8103")
+    print("[MCP] 4 servers: Browser :8101 | Audit :8102 | DigiLocker :8103 | WhatsApp :8104")
 
 
 # ---------------------------------------------------------------------------

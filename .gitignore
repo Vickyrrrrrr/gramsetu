@@ -33,3 +33,9 @@ data/*.db
 # Docker / local ops
 .env.local
 docker-compose.override.yml
+
+
+
+
+# temp
+docs

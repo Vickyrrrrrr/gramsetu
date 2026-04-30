@@ -1,35 +1,46 @@
 """
 ============================================================
-llm_client.py — Multi-Provider LLM Client (Production)
+llm_client.py — Multi-Provider LLM Client (Production v4)
 ============================================================
-Provider Strategy:
-  TEXT / CHAT / INTENT / TRANSLATION
-      -> Groq (primary -- generous free tier, very fast ~100-300ms)
-      -> NVIDIA NIM (fallback)
+Provider Strategy (CORRECT MODEL FOR EACH TASK):
 
-  VISION (form screenshots, PDF pages)
-      -> NVIDIA llama-3.2-11b-vision-instruct (free tier)
-      -> Groq llama-3.2-11b-vision-preview (fallback)
+  TEXT / CHAT / INTENT / FORM-FILL
+      → Sarvam (PRIMARY — purpose-built for Indian languages)
+      → Groq (FALLBACK — llama-3.3-70b, fast & free)
+      → NVIDIA NIM (BACKUP — meta/llama-3.1-8b-instruct)
 
-  ASR  (voice messages)
-      -> Groq whisper-large-v3 (best accuracy for Indian languages)
-      -> NVIDIA parakeet-ctc-1.1b-asr (fallback)
+  VISION (form screenshots, portal page analysis)
+      → NVIDIA NIM (PRIMARY — llama-3.2-11b-vision-instruct)
+      → Groq Vision (FALLBACK — llama-3.2-11b-vision-preview)
 
-Groq Models:
-  INTENT      llama-3.1-8b-instant       ~50ms fast JSON
-  CHAT/TRANS  llama-3.3-70b-versatile    best free multilingual 70B
-  ASR         whisper-large-v3           99 languages incl. Hindi
+  ASR / STT (voice-to-text)
+      → Sarvam Saaras v3 (PRIMARY — best for Hindi + 10 languages)
+      → Groq Whisper v3 (FALLBACK — 99 languages)
+      → NVIDIA Parakeet (BACKUP)
 
-NVIDIA NIM Free Models:
-  VISION      nvidia/llama-3.2-11b-vision-instruct
-  ASR-BACKUP  nvidia/parakeet-ctc-1.1b-asr
-  TEXT-BACKUP meta/llama-3.1-8b-instruct
+  REALTIME STT (live microphone)
+      → Sarvam WebSocket saaras:v3 (PRIMARY — sub-500ms latency)
+
+  TTS (text-to-speech)
+      → Sarvam Bulbul v3 (PRIMARY — 11 Indian voices)
+      → edge-tts (FALLBACK — Microsoft neural voices, free)
+
+  TRANSLATION (Hindi ↔ regional languages)
+      → Sarvam Translate (PRIMARY — specialized Indic API)
+      → Groq (FALLBACK — llama-3.3-70b)
+
+Sarvam Models:
+  CHAT        sarvam-m / sarvam-30b / sarvam-105b
+  STT         saaras:v3
+  TTS         bulbul:v3
 """
 
 import os
 import re
 import json
 from typing import Optional
+import time
+import asyncio
 import httpx
 from dotenv import load_dotenv
 
@@ -46,22 +57,56 @@ NVIDIA_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 SARVAM_URL = "https://api.sarvam.ai"
 
 def _sarvam_ok() -> bool:
+    """Check if Sarvam API key is configured and valid."""
     return bool(SARVAM_API_KEY and SARVAM_API_KEY not in ("", "your_sarvam_key_here"))
 
 async def _sarvam_call(messages: list, temperature: float, max_tokens: int) -> str:
     if not _sarvam_ok():
         return ""
-    # Sarvam uses OpenAI-compatible chat endpoint
-    return await _openai_compat(f"{SARVAM_URL}", SARVAM_API_KEY, "sarvam-1", messages, temperature, max_tokens)
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    f"{SARVAM_URL}/v1/chat/completions",
+                    headers={
+                        "api-subscription-key": SARVAM_API_KEY,
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": SARVAM_CHAT_MODEL,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                )
+            if response.status_code == 429:
+                await asyncio.sleep((attempt + 1) * 2)
+                continue
+            if response.status_code != 200:
+                print(f"[LLM] Sarvam {response.status_code}: {response.text[:200]}")
+                return ""
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            if attempt == 2:
+                print(f"[LLM] Sarvam error: {type(e).__name__}")
+                return ""
+            await asyncio.sleep(1)
+    return ""
+
+# -- Sarvam Models (Indian languages optimized) ------------
+SARVAM_CHAT_MODEL = os.getenv("SARVAM_CHAT_MODEL", "sarvam-30b")
+# sarvam-m (fast, think-tags), sarvam-30b (balanced, clean), sarvam-105b (best)
+
 
 # -- Groq Models ----------------------------------------------
+
 GROQ_MODEL_FAST   = os.getenv("GROQ_MODEL_FAST",   "llama-3.1-8b-instant")
 GROQ_MODEL_MAIN   = os.getenv("GROQ_MODEL_MAIN",   "llama-3.3-70b-versatile")
-GROQ_MODEL_VISION = os.getenv("GROQ_MODEL_VISION", "llama-3.2-11b-vision-preview")
+GROQ_MODEL_VISION = os.getenv("GROQ_MODEL_VISION", "meta-llama/llama-4-scout-17b-16e-instruct")
 GROQ_WHISPER      = "whisper-large-v3"
 
 # -- NVIDIA NIM Models (free tier) ----------------------------
-NIM_MODEL_VISION  = os.getenv("NIM_MODEL_VISION",  "nvidia/llama-3.2-11b-vision-instruct")
+NIM_MODEL_VISION  = os.getenv("NIM_MODEL_VISION",  "meta/llama-3.2-11b-vision-instruct")
 NIM_MODEL_GENERAL = os.getenv("NIM_MODEL_GENERAL", "meta/llama-3.1-8b-instruct")
 
 # Legacy aliases kept for external imports
@@ -97,41 +142,55 @@ async def _openai_compat(
     temperature: float,
     max_tokens: int,
 ) -> str:
-    try:
-        async with httpx.AsyncClient(timeout=25.0) as client:
-            response = await client.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": model, "messages": messages, "temperature": temperature, "max_tokens": max_tokens},
-            )
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    base_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    },
+                )
+            if response.status_code == 429:
+                wait = (attempt + 1) * 2
+                print(f"[LLM] Rate limit (429). Retrying in {wait}s...")
+                await asyncio.sleep(wait)
+                continue
             if response.status_code != 200:
-                print(f"[LLM] {model} HTTP {response.status_code}: {response.text[:300]}")
+                print(f"[LLM] Error {response.status_code} at {base_url} (Model: {model}): {response.text}")
                 return ""
-            content = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
-            if not content:
-                print(f"[LLM] {model} returned empty content")
-            return content
-    except Exception as e:
-        print(f"[LLM] {model} failed: {type(e).__name__}: {e}")
+            return response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            if attempt == 2:
+                print(f"[LLM] Final attempt failed: {e}")
+                return ""
+            await asyncio.sleep(1)
     return ""
 
 
 async def _groq_call(model: str, messages: list, temperature: float, max_tokens: int) -> str:
     if not _groq_ok():
         return ""
-    return await _openai_compat(GROQ_URL, GROQ_API_KEY, model, messages, temperature, max_tokens)
+    return await _openai_compat(f"{GROQ_URL}/chat/completions", GROQ_API_KEY, model, messages, temperature, max_tokens)
 
 
 async def _nim_call(model: str, messages: list, temperature: float, max_tokens: int) -> str:
     if not _nim_ok():
         return ""
-    return await _openai_compat(NVIDIA_URL, NVIDIA_API_KEY, model, messages, temperature, max_tokens)
+    return await _openai_compat(f"{NVIDIA_URL}/chat/completions", NVIDIA_API_KEY, model, messages, temperature, max_tokens)
 
 
 # -- Public LLM Functions -------------------------------------
 
 async def chat_intent(messages: list, temperature: float = 0.1, max_tokens: int = 256) -> str:
-    """Fast intent classification -- Sarvam/Groq llama-3.1-8b-instant."""
+    """Fast intent classification — Sarvam (PRIMARY, India-optimized) → Groq → NVIDIA."""
     result = await _sarvam_call(messages, temperature, max_tokens)
     if result:
         return result
@@ -142,7 +201,7 @@ async def chat_intent(messages: list, temperature: float = 0.1, max_tokens: int 
 
 
 async def chat_conversational(messages: list, temperature: float = 0.6, max_tokens: int = 768) -> str:
-    """Warm multilingual conversation -- Sarvam primary."""
+    """Warm multilingual conversation — Sarvam (PRIMARY, best for Hindi/Indic) → Groq → NVIDIA."""
     result = await _sarvam_call(messages, temperature, max_tokens)
     if result:
         return result
@@ -153,7 +212,7 @@ async def chat_conversational(messages: list, temperature: float = 0.6, max_toke
 
 
 async def chat_extraction(messages: list, temperature: float = 0.1, max_tokens: int = 512) -> str:
-    """Structured extraction -- Sarvam/Groq 70B."""
+    """Structured data extraction — Sarvam (PRIMARY, understands Hindi forms) → Groq → NVIDIA."""
     result = await _sarvam_call(messages, temperature, max_tokens)
     if result:
         return result
@@ -218,12 +277,10 @@ async def chat_translation(text: str, source_lang: str, target_lang: str) -> str
 
 
 async def chat(
-    messages: list,
-    temperature: float = 0.3,
-    max_tokens: int = 1024,
+    messages: list, temperature: float = 0.3, max_tokens: int = 1024,
     use_web_search: bool = False,
 ) -> str:
-    """General-purpose chat -- Sarvam primary, then Groq/NVIDIA."""
+    """General-purpose chat — Sarvam (PRIMARY, India-optimized) → Groq → NVIDIA."""
     result = await _sarvam_call(messages, temperature, max_tokens)
     if result:
         return result
@@ -255,9 +312,6 @@ async def detect_intent(text: str) -> str:
         },
         {"role": "user", "content": text},
     ]
-    result = await _sarvam_call(messages, 0.0, 32)
-    if result:
-        return result.strip().lower()
     result = await _groq_call(GROQ_MODEL_FAST, messages, 0.0, 32)
     if result:
         return result.strip().lower()
@@ -324,7 +378,8 @@ async def chat_vision(
 
 async def transcribe_audio_sarvam(audio_path: str, language: str = "hi") -> str:
     """
-    Transcribe audio using Sarvam Saaras (Best for Indian languages).
+    Transcribe audio using Sarvam Saaras (PRIMARY — Best for Indian languages).
+    Uses saaras:v3 — optimized for Hindi, Tamil, Telugu, Bengali + 8 more languages.
     """
     if not _sarvam_ok():
         return ""
@@ -332,23 +387,31 @@ async def transcribe_audio_sarvam(audio_path: str, language: str = "hi") -> str:
         async with httpx.AsyncClient(timeout=30.0) as client:
             with open(audio_path, "rb") as f:
                 response = await client.post(
-                    f"{SARVAM_URL}/speech-to-text-translate",
-                    headers={"Authorization": f"Bearer {SARVAM_API_KEY}"},
-                    files={"file": f},
-                    data={"model": "saaras-v1", "language_code": language},
+                    f"{SARVAM_URL}/speech-to-text",
+                    headers={
+                        "api-subscription-key": SARVAM_API_KEY,
+                        "Accept": "application/json",
+                    },
+                    files={"file": (os.path.basename(audio_path), f, "audio/wav")},
+                    data={
+                        "model": "saaras:v3",
+                        "language_code": language,
+                        "with_timestamps": "false",
+                    },
                 )
             if response.status_code == 200:
-                return response.json().get("transcript", "")
+                data = response.json()
+                return data.get("transcript", "") or data.get("text", "")
+            print(f"[ASR] Sarvam HTTP {response.status_code}: {response.text[:200]}")
     except Exception as e:
-        print(f"[ASR] Sarvam failed: {e}")
+        print(f"[ASR] Sarvam failed: {type(e).__name__}: {e}")
     return ""
 
 
 async def transcribe_audio_groq(audio_path: str, language: str = "hi") -> str:
     """
-    Transcribe audio using Groq Whisper (whisper-large-v3).
-    Best free ASR -- supports Hindi, Tamil, Telugu, Bengali, Gujarati,
-    Kannada, Malayalam, Punjabi, Urdu, Marathi and 90+ other languages.
+    Transcribe audio using Groq Whisper (FALLBACK — whisper-large-v3).
+    Best free ASR backup — supports Hindi, Tamil, Telugu + 90+ languages.
     """
     if not _groq_ok():
         return ""
@@ -356,7 +419,7 @@ async def transcribe_audio_groq(audio_path: str, language: str = "hi") -> str:
         "hi": "hi", "en": "en", "mr": "mr", "ta": "ta", "te": "te",
         "bn": "bn", "gu": "gu", "kn": "kn", "ml": "ml", "pa": "pa", "ur": "ur",
     }
-    whisper_lang = whisper_lang_map.get(language, "hi")
+    whisper_lang = whisper_lang_map.get(language[:2], language[:2])
     try:
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
@@ -364,8 +427,13 @@ async def transcribe_audio_groq(audio_path: str, language: str = "hi") -> str:
             response = await client.post(
                 f"{GROQ_URL}/audio/transcriptions",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                files={"file": (os.path.basename(audio_path), audio_bytes, "audio/ogg")},
-                data={"model": GROQ_WHISPER, "language": whisper_lang, "response_format": "text"},
+                files={"file": (os.path.basename(audio_path), audio_bytes, "audio/wav")},
+                data={
+                    "model": GROQ_WHISPER,
+                    "language": whisper_lang,
+                    "response_format": "text",
+                    "temperature": "0",
+                },
             )
         if response.status_code == 200:
             return response.text.strip()
@@ -377,23 +445,8 @@ async def transcribe_audio_groq(audio_path: str, language: str = "hi") -> str:
 
 
 async def transcribe_audio_nvidia(audio_path: str, language: str = "hi") -> str:
-    """Transcribe audio using NVIDIA parakeet-ctc-1.1b ASR (backup)."""
-    if not _nim_ok():
-        return ""
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            with open(audio_path, "rb") as f:
-                response = await client.post(
-                    f"{NVIDIA_URL}/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {NVIDIA_API_KEY}"},
-                    files={"file": f},
-                    data={"model": "nvidia/parakeet-ctc-1.1b-asr", "language": language},
-                )
-        if response.status_code == 200:
-            return response.json().get("text", "")
-        return ""
-    except Exception:
-        return ""
+    """NVIDIA Parakeet ASR — DEPRECATED (endpoint no longer available). Returns empty."""
+    return ""
 
 
 async def extract_json(response: str) -> Optional[dict]:

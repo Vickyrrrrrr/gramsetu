@@ -77,7 +77,8 @@ class GramSetuState(TypedDict, total=False):
     receipt_ready: bool
     reference_number: str
 
-    # ── Reliability Layer ─────────────────────────────────────
+    # ── Security ──────────────────────────────────────────────
+    identity_verified: bool     # Aadhaar + face verification passed
     review_required: bool
     review_reasons: list
     review_checklist: list
@@ -635,6 +636,25 @@ class JanDhanAccount(BaseModel):
 # will work automatically for the new form type.
 # ============================================================
 
+# ============================================================
+# Schema 11: Generic Form (for any form type)
+# ============================================================
+
+class GenericForm(BaseModel):
+    """Catch-all for any form not in the predefined registry."""
+    model_config = {"extra": "allow"}
+
+    form_description: str = Field("", description="What this form is for")
+    form_data: dict = Field(default_factory=dict, description="Dynamic field data")
+
+
+# ============================================================
+# Schema Registry — Maps form_type to model class
+# Add any new form: just add its Pydantic model above and register here.
+# The entire LangGraph pipeline (voice, validation, DigiLocker, fill)
+# will work automatically for the new form type.
+# ============================================================
+
 SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
     # Government welfare
     "ration_card": RationCard,
@@ -652,6 +672,8 @@ SCHEMA_REGISTRY: dict[str, type[BaseModel]] = {
     "kisan_credit_card": KisanCreditCard,
     # Financial inclusion
     "jan_dhan": JanDhanAccount,
+    # Generic catch-all
+    "generic": GenericForm,
 }
 
 
