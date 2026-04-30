@@ -41,7 +41,7 @@ _impact: ImpactStats = {
 
 app = FastAPI(title="GramSetu API", version="1.0")
 # ── CORS: restrict to known origins (not wildcard) ──────
-ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,https://gramsetu.vercel.app").split(",")
+ALLOWED_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000,https://gramsetu-three.vercel.app").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["GET","POST"], allow_headers=["*"])
 
 STATIC_DIR = os.path.dirname(os.path.abspath(__file__))
