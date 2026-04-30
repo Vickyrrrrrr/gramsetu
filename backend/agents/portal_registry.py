@@ -280,14 +280,69 @@ OTP_KEYWORDS: dict[str, list[str]] = {
 
 def get_portal_info(form_type: str) -> dict:
     """Get full portal configuration for a form type."""
+    url = PORTAL_URLS.get(form_type)
+    name = PORTAL_NAMES.get(form_type)
+    
+    if not url and not is_known_form(form_type):
+        # Unknown form type — use LLM to determine portal URL
+        url = None  # Will be resolved dynamically in fill_form_node
+        name = form_type.replace("_", " ").title()
+    
     return {
-        "url": PORTAL_URLS.get(form_type, "https://services.india.gov.in/"),
-        "name": PORTAL_NAMES.get(form_type, "Government Portal"),
+        "url": url or "",
+        "name": name or "Government Portal",
         "field_mappings": FIELD_MAPPINGS.get(form_type, {}),
         "select_options": SELECT_OPTIONS.get(form_type, {}),
         "sections": PAGE_SECTIONS.get(form_type, []),
         "otp_keywords": OTP_KEYWORDS["default"],
     }
+
+
+def is_known_form(form_type: str) -> bool:
+    """Check if this is a known form type with a pre-registered portal."""
+    return form_type in PORTAL_URLS
+
+
+async def resolve_portal_url(form_type: str, lang: str = "hi") -> str:
+    """
+    Use LLM to find the correct portal URL for ANY form type.
+    Returns the URL or empty string if not found.
+    """
+    try:
+        from backend.llm_client import chat_intent
+        prompt = (
+            f"What is the exact URL of the official government or institutional portal "
+            f"where a '{form_type}' application can be filled in India? "
+            f"Return ONLY the full URL. If unsure, return the most likely URL. "
+            f"Do NOT explain — just the URL."
+        )
+        result = await chat_intent(
+            [{"role": "user", "content": prompt}], temperature=0.0, max_tokens=120
+        )
+        if result:
+            import re
+            m = re.search(r'(https?://[^\s"\']{5,})', result)
+            if m:
+                return m.group(1).rstrip(".")
+            # Check if it's a bare URL
+            clean = result.strip().rstrip(".")
+            if clean.startswith("http"):
+                return clean
+    except Exception:
+        pass
+
+    # Common fallbacks for well-known forms
+    fallbacks = {
+        "y_combinator": "https://apply.ycombinator.com",
+        "passport": "https://www.passportindia.gov.in",
+        "driving_licence": "https://sarathi.parivahan.gov.in",
+        "driving_license": "https://sarathi.parivahan.gov.in",
+    }
+    for key, url in fallbacks.items():
+        if key in form_type.lower():
+            return url
+
+    return ""
 
 
 def get_field_labels(form_type: str, field_name: str) -> list[str]:

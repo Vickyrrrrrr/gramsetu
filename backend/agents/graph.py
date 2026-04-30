@@ -1205,9 +1205,25 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     router = get_router()
 
     # Get portal URL
-    from backend.agents.portal_registry import get_portal_info
+    # Resolve portal URL — use LLM for unknown forms
+    from backend.agents.portal_registry import get_portal_info, resolve_portal_url, is_known_form
     portal_info = get_portal_info(form_type)
     portal_url = portal_info["url"]
+    
+    if not portal_url and not is_known_form(form_type):
+        portal_url = await resolve_portal_url(form_type, lang)
+    
+    if not portal_url:
+        state["response"] = await _localized(
+            f"📋 मुझे *{form_type.replace('_', ' ')}* के लिए पोर्टल URL नहीं मिला।\nकृपया उस वेबसाइट का URL भेजें जहाँ यह फ़ॉर्म भरना है।",
+            f"📋 I couldn't find the portal URL for *{form_type.replace('_', ' ')}*.\nPlease send the website URL where this form should be filled.",
+            lang,
+        )
+        state["status"] = GraphStatus.WAIT_USER.value
+        state["next_node"] = "fill_form"
+        state["current_node"] = "fill_form"
+        return state
+
     state["portal_url"] = portal_url
 
     # Execute navigate + fill via MCP
@@ -1492,10 +1508,21 @@ async def _process(compiled, user_id, user_phone, message, message_type,
                     )
                     return _format_result(existing_state, session_id)
 
+            # ── Handle portal URL submission ────────────────
+            import re as _urlre
+            if next_n == "fill_form" and not existing_state.get("portal_url"):
+                url_match = _urlre.search(r'(https?://[^\s"\']{5,})', text)
+                if url_match:
+                    existing_state["portal_url"] = url_match.group(1)
+                    existing_state["status"] = GraphStatus.ACTIVE.value
+                    existing_state["last_active"] = time.time()
+                    result = await fill_form_node(existing_state)
+                    await compiled.aupdate_state(config, result, as_node="fill_form")
+                    return _format_result(result, session_id)
+
             # ── Handle consent confirmation ──────────────────
             consent_words = {"i confirm", "i agree", "confirm", "yes i confirm",
                              "मैं पुष्टि करता", "मैं पुष्टि करती", "सहमत", "agree"}
-            next_n = existing_state.get("next_node", "")
             if next_n == "fill_form" and text.lower().strip() in consent_words:
                 existing_state["consent_confirmed"] = True
                 existing_state["status"] = GraphStatus.ACTIVE.value
