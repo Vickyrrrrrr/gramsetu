@@ -17,7 +17,7 @@ load_dotenv()
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend import database as db
-from backend.agents.graph import process_message as v3_process_message
+from backend.agents.pipeline import process_message as v3_process_message
 from backend.agents.schema import GraphStatus
 from backend.security import api_limiter, sanitize_input, validate_otp_input
 from backend.schemes import discover_schemes

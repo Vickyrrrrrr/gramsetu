@@ -1,7 +1,4 @@
 # ── AI / LLM ──────────────────────────────────────────────
-langgraph>=0.3.0
-langchain-core>=0.3.0
-langgraph-checkpoint-sqlite>=2.0.0
 mcp>=1.20.0
 fastmcp>=0.5.0
 
