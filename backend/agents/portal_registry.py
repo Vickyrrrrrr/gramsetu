@@ -331,17 +331,6 @@ async def resolve_portal_url(form_type: str, lang: str = "hi") -> str:
     except Exception:
         pass
 
-    # Common fallbacks for well-known forms
-    fallbacks = {
-        "y_combinator": "https://apply.ycombinator.com",
-        "passport": "https://www.passportindia.gov.in",
-        "driving_licence": "https://sarathi.parivahan.gov.in",
-        "driving_license": "https://sarathi.parivahan.gov.in",
-    }
-    for key, url in fallbacks.items():
-        if key in form_type.lower():
-            return url
-
     return ""
 
 
