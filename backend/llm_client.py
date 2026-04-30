@@ -382,6 +382,11 @@ async def transcribe_audio_sarvam(audio_path: str, language: str = "hi") -> str:
     """
     if not _sarvam_ok():
         return ""
+    # Detect MIME type from file extension
+    ext = os.path.splitext(audio_path)[1].lower()
+    mime_map = {".webm": "audio/webm", ".ogg": "audio/ogg", ".opus": "audio/ogg",
+                ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4"}
+    mime_type = mime_map.get(ext, "audio/wav")
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             with open(audio_path, "rb") as f:
@@ -391,7 +396,7 @@ async def transcribe_audio_sarvam(audio_path: str, language: str = "hi") -> str:
                         "api-subscription-key": SARVAM_API_KEY,
                         "Accept": "application/json",
                     },
-                    files={"file": (os.path.basename(audio_path), f, "audio/wav")},
+                    files={"file": (os.path.basename(audio_path), f, mime_type)},
                     data={
                         "model": "saaras:v3",
                         "language_code": language,

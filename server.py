@@ -134,12 +134,14 @@ async def stop_browser(request: Request):
 @app.post("/api/voice")
 async def voice_input(request: Request):
     content_type = request.headers.get("content-type", "")
+    lang = "hi"
     if "multipart/form-data" in content_type:
         form = await request.form()
         audio_file = form.get("audio")
         if not isinstance(audio_file, UploadFile):
             raise HTTPException(status_code=400, detail="'audio' field required")
         audio_bytes = await audio_file.read()
+        lang = form.get("language", "hi")
     else:
         audio_bytes = await request.body()
     if not audio_bytes:
@@ -154,9 +156,9 @@ async def voice_input(request: Request):
     
     try:
         from backend.llm_client import transcribe_audio_sarvam, transcribe_audio_groq
-        text = await transcribe_audio_sarvam(tmp.name)
+        text = await transcribe_audio_sarvam(tmp.name, lang)
         if not text:
-            text = await transcribe_audio_groq(tmp.name)
+            text = await transcribe_audio_groq(tmp.name, lang)
     except Exception as e:
         print(f"[Voice] Transcription error: {e}")
         text = ""
@@ -165,7 +167,7 @@ async def voice_input(request: Request):
         except Exception: pass
     
     if not text:
-        return JSONResponse({"text": "", "language_detected": "hi", "confidence": 0.0})
+        return JSONResponse({"text": "", "language_detected": lang, "confidence": 0.0})
     return JSONResponse({"text": text, "language_detected": detect_language(text), "confidence": 0.85})
 
 

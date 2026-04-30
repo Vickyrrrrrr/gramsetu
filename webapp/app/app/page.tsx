@@ -355,60 +355,43 @@ export default function AppPage() {
     setInput(`Here is my information:\n${txt}`)
   }
 
-  /* ── realtime voice ──────────────── */
-  const rWsRef = useRef<WebSocket | null>(null)
-  const actxRef = useRef<AudioContext | null>(null)
-  const procRef = useRef<ScriptProcessorNode | null>(null)
-  const streamRef = useRef<MediaStream | null>(null)
-  const stopRef = useRef<() => void>(() => {})
-
+  /* ── simple voice (MediaRecorder upload) ── */
   const stopVoice = useCallback(() => {
-    if (rWsRef.current) { try { rWsRef.current.send(JSON.stringify({ type: 'stop' })) } catch {}; rWsRef.current.close(); rWsRef.current = null }
-    if (procRef.current) { procRef.current.disconnect(); procRef.current = null }
-    if (actxRef.current) { actxRef.current.close(); actxRef.current = null }
-    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null }
-    setRecording(false); setLiveTxt('')
+    if (mediaRecRef.current && mediaRecRef.current.state !== 'inactive') {
+      mediaRecRef.current.stop()
+    }
+    setRecording(false)
   }, [])
-
-  useEffect(() => { stopRef.current = stopVoice }, [stopVoice])
 
   const startVoice = useCallback(async () => {
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true } })
-      streamRef.current = s
-      const p = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const ws = new WebSocket(`${p}//${window.location.hostname}:8000/api/voice/realtime`)
-      rWsRef.current = ws
-      ws.onopen = () => {
-        ws.send(JSON.stringify({ type: 'start', language: lang }))
-        setRecording(true); setLiveTxt('')
-        const ac = new AudioContext({ sampleRate: 16000 }); actxRef.current = ac
-        const src = ac.createMediaStreamSource(s)
-        const pr = ac.createScriptProcessor(4096, 1, 1); procRef.current = pr
-        pr.onaudioprocess = e => {
-          if (ws.readyState === WebSocket.OPEN) {
-            const d = e.inputBuffer.getChannelData(0)
-            const pcm = new Int16Array(d.length)
-            for (let i = 0; i < d.length; i++) pcm[i] = Math.max(-1, Math.min(1, d[i])) * 0x7fff
-            ws.send(pcm.buffer)
-          }
-        }
-        src.connect(pr); pr.connect(ac.destination)
-      }
-      ws.onmessage = ev => {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      chunksRef.current = []
+      mr.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data) }
+      mr.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop())
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        const fd = new FormData()
+        fd.append('audio', blob, 'recording.webm')
         try {
-          const d = JSON.parse(ev.data)
-          if (d.type === 'error') { setLiveTxt(''); stopRef.current(); return }
-          if (d.type === 'transcript' && d.text) {
-            setLiveTxt(d.text)
-            if (d.is_final) { setInput(d.text); setLiveTxt(''); stopRef.current(); setTimeout(() => send(d.text), 100) }
+          const res = await fetch('/api/voice', { method: 'POST', body: fd })
+          if (res.ok) {
+            const data = await res.json()
+            if (data.text) {
+              setInput(data.text)
+              send(data.text)
+            }
           }
-        } catch {}
+        } catch { /* voice unavailable */ }
+        setRecording(false)
+        setLiveTxt('')
       }
-      ws.onerror = () => stopRef.current()
-      ws.onclose = () => { setRecording(false); setLiveTxt('') }
+      mr.start()
+      mediaRecRef.current = mr
+      setRecording(true)
     } catch { setRecording(false) }
-  }, [send, lang])
+  }, [send])
 
   /* ── render ──────────────────────── */
   const isFirst = messages.length <= 1
