@@ -357,8 +357,15 @@ async def reject_submission(submission_id: int, request: Request):
 # ── Health ────────────────────────────────────────────────
 @app.get("/api/health")
 async def health():
-    from backend.llm_client import _groq_ok, _nim_ok
-    return JSONResponse({"status": "ok", "groq": "configured" if _groq_ok() else "missing_key", "nvidia": "configured" if _nim_ok() else "missing_key"})
+    from backend.llm_client import _groq_ok, _nim_ok, _sarvam_ok
+    from backend.circuit_breaker import get_all_circuit_status
+    return JSONResponse({
+        "status": "ok",
+        "sarvam": "configured" if _sarvam_ok() else "missing_key",
+        "groq": "configured" if _groq_ok() else "missing_key",
+        "nvidia": "configured" if _nim_ok() else "missing_key",
+        "circuits": get_all_circuit_status(),
+    })
 
 @app.get("/api/mcp-status")
 async def mcp_status():

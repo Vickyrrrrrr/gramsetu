@@ -158,19 +158,27 @@ async def _openai_compat(
                     },
                 )
             if response.status_code == 429:
-                wait = (attempt + 1) * 2
+                wait = 2 ** attempt  # exponential: 1s, 2s, 4s
                 print(f"[LLM] Rate limit (429). Retrying in {wait}s...")
                 await asyncio.sleep(wait)
                 continue
+            if response.status_code == 503 or response.status_code == 502:
+                wait = 2 ** attempt
+                print(f"[LLM] Service unavailable ({response.status_code}). Retrying in {wait}s...")
+                await asyncio.sleep(wait)
+                continue
             if response.status_code != 200:
-                print(f"[LLM] Error {response.status_code} at {base_url} (Model: {model}): {response.text}")
+                print(f"[LLM] Error {response.status_code} at {base_url} (Model: {model}): {response.text[:300]}")
                 return ""
             return response.json()["choices"][0]["message"]["content"]
         except Exception as e:
-            if attempt == 2:
-                print(f"[LLM] Final attempt failed: {e}")
+            wait = 2 ** attempt
+            print(f"[LLM] Attempt {attempt+1} failed ({type(e).__name__}). Retry in {wait}s...")
+            if attempt < 2:
+                await asyncio.sleep(wait)
+            else:
+                print(f"[LLM] All 3 attempts failed: {e}")
                 return ""
-            await asyncio.sleep(1)
     return ""
 
 
@@ -189,25 +197,41 @@ async def _nim_call(model: str, messages: list, temperature: float, max_tokens: 
 # -- Public LLM Functions -------------------------------------
 
 async def chat_intent(messages: list, temperature: float = 0.1, max_tokens: int = 256) -> str:
-    """Fast intent classification — Sarvam (PRIMARY, India-optimized) → Groq → NVIDIA."""
-    result = await _sarvam_call(messages, temperature, max_tokens)
+    """Fast intent classification — Sarvam → Groq with circuit breaker."""
+    from backend.circuit_breaker import call_with_circuit_breaker
+
+    async def _try_sarvam():
+        return await _sarvam_call(messages, temperature, max_tokens)
+
+    async def _try_groq():
+        return await _groq_call(GROQ_MODEL_FAST, messages, temperature, max_tokens)
+
+    async def _try_nim():
+        return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
+
+    result = await call_with_circuit_breaker("sarvam", "groq", _try_sarvam, _try_groq)
     if result:
         return result
-    result = await _groq_call(GROQ_MODEL_FAST, messages, temperature, max_tokens)
-    if result:
-        return result
-    return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
+    return await _try_nim() or ""
 
 
 async def chat_conversational(messages: list, temperature: float = 0.6, max_tokens: int = 768) -> str:
-    """Warm multilingual conversation — Sarvam (PRIMARY, best for Hindi/Indic) → Groq → NVIDIA."""
-    result = await _sarvam_call(messages, temperature, max_tokens)
+    """Warm multilingual conversation — Sarvam → Groq with circuit breaker."""
+    from backend.circuit_breaker import call_with_circuit_breaker
+
+    async def _try_sarvam():
+        return await _sarvam_call(messages, temperature, max_tokens)
+
+    async def _try_groq():
+        return await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
+
+    async def _try_nim():
+        return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
+
+    result = await call_with_circuit_breaker("sarvam", "groq", _try_sarvam, _try_groq)
     if result:
         return result
-    result = await _groq_call(GROQ_MODEL_MAIN, messages, temperature, max_tokens)
-    if result:
-        return result
-    return await _nim_call(NIM_MODEL_GENERAL, messages, temperature, max_tokens)
+    return await _try_nim() or ""
 
 
 async def chat_extraction(messages: list, temperature: float = 0.1, max_tokens: int = 512) -> str:

@@ -16,10 +16,13 @@ Meta sends:
 """
 import os
 import base64
+import time
+import json
 import httpx
 import asyncio
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import PlainTextResponse, JSONResponse
+from backend.persistent_state import set_state as _persist_set, delete_state as _persist_del
 
 router = APIRouter(prefix="/api/whatsapp", tags=["whatsapp-meta"])
 
@@ -29,6 +32,72 @@ META_VERIFY_TOKEN = os.getenv("META_VERIFY_TOKEN", "gramsetu_verify_2026")
 META_PHONE_NUMBER_ID = os.getenv("META_PHONE_NUMBER_ID", "")
 META_API_VERSION = os.getenv("META_API_VERSION", "v22.0")
 META_API_URL = f"https://graph.facebook.com/{META_API_VERSION}/{META_PHONE_NUMBER_ID}"
+
+
+# ── Dead-letter queue for failed messages ──────────────────
+# Messages that fail to process are stored in persistent state
+# and retried on the next health check or new message arrival.
+_DEAD_LETTER_NAMESPACE = "dead_letter"
+_MAX_RETRIES = 3
+_RETRY_DELAY = 30  # seconds before retry
+
+
+async def queue_dead_letter(phone: str, msg_type: str, payload: str):
+    """Store a failed message for later retry."""
+    key = f"{phone}_{int(time.time())}"
+    _persist_set(_DEAD_LETTER_NAMESPACE, key, {
+        "phone": phone, "type": msg_type, "payload": payload,
+        "retries": 0, "created": time.time(),
+    })
+
+
+async def process_dead_letters():
+    """Retry all pending dead-letter messages."""
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+            "data", "state.db"
+        ))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT namespace, key, value FROM kv WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)",
+            (_DEAD_LETTER_NAMESPACE, time.time())
+        ).fetchall()
+        conn.close()
+
+        recovered = 0
+        for row in rows:
+            try:
+                data = json.loads(row[2])
+                if data.get("retries", 0) >= _MAX_RETRIES:
+                    _persist_del(_DEAD_LETTER_NAMESPACE, row[1])
+                    continue
+
+                phone = data.get("phone", "")
+                msg_type = data.get("type", "text")
+                payload = data.get("payload", "")
+                if not phone or not payload:
+                    continue
+
+                if msg_type == "image":
+                    await process_and_reply(phone, "📸 [Retry]", "image", payload)
+                else:
+                    await process_and_reply(phone, payload)
+
+                _persist_del(_DEAD_LETTER_NAMESPACE, row[1])
+                recovered += 1
+                print(f"[DLQ] Recovered message for {phone}")
+            except Exception as e:
+                print(f"[DLQ] Retry failed: {e}")
+                data["retries"] = data.get("retries", 0) + 1
+                _persist_set(_DEAD_LETTER_NAMESPACE, row[1], data)
+
+        if recovered:
+            print(f"[DLQ] Recovered {recovered} dead-letter messages")
+    except Exception as e:
+        print(f"[DLQ] Processing error: {e}")
 
 
 # ════════════════════════════════════════════════════════════
@@ -62,11 +131,18 @@ async def receive_message(request: Request):
     """
     Meta sends message payloads here.
     Processes through GramSetu agent and sends response.
+    Failed messages are queued for retry via dead-letter queue.
     """
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"status": "bad_request"}, status_code=400)
+
+    # Process dead-letter queue on every webhook call (opportunistic retry)
+    try:
+        await process_dead_letters()
+    except Exception:
+        pass
 
     # Extract messages from Meta's payload format
     entries = body.get("entry", [])
