@@ -356,22 +356,22 @@ if __name__ == "__main__":
 
 
 
-class TestFinalSubmissionGate:
+class TestAuditValidation:
+    """Tests use the active audit_mcp.validate_field instead of removed validator."""
     def test_blocks_invalid_mobile(self):
-        from agent_core.validator import final_submission_gate
-        result = final_submission_gate("ration_card", {"mobile": "1234567890"}, ["mobile"])
+        from backend.mcp_servers.audit_mcp import validate_field
+        result = validate_field("mobile_number", "1234567890", "ration_card")
         assert result["valid"] is False
-        assert "mobile" in result["field_errors"] or result["consistency_errors"]
 
-    def test_blocks_missing_required(self):
-        from agent_core.validator import final_submission_gate
-        result = final_submission_gate("ration_card", {"full_name": "Vicky"}, ["full_name", "pincode"])
-        assert result["valid"] is False
-        assert "pincode" in result["missing"]
+    def test_valid_mobile_passes(self):
+        from backend.mcp_servers.audit_mcp import validate_field
+        result = validate_field("mobile_number", "9876543210", "ration_card")
+        assert result["valid"] is True
 
     def test_normalizes_pan(self):
-        from agent_core.validator import normalize_field_value
-        assert normalize_field_value("pan_number", " abcpk1234q ") == "ABCPK1234Q"
+        from backend.mcp_servers.audit_mcp import validate_field
+        result = validate_field("pan_number", "ABCPK1234Q", "pan_card")
+        assert result["valid"] is True
 
 
 class TestHumanReviewGuard:

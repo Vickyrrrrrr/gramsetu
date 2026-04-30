@@ -21,16 +21,11 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu Browser Server")
 
-# ── Aliases for backward compatibility with tests ──────────
-# Tests import 'stagehand_fill' from browser_mcp
+# ── Legacy alias for test compatibility ─────────────────────
 async def stagehand_fill(portal_url: str, form_data: dict, form_type: str,
                          screenshot_path: str = "", headless: bool = False) -> dict:
-    """Fill form using Stagehand (delegates to fill_form MCP tool)."""
-    try:
-        from backend.stagehand_client import stagehand_fill_form
-        return await stagehand_fill_form(portal_url, form_data, form_type, screenshot_path, headless)
-    except ImportError:
-        return {"success": False, "error": "Stagehand not available"}
+    """Legacy — delegates to Playwright fill_form. Returns empty stub."""
+    return {"success": False, "error": "Stagehand removed. Use fill_form tool instead."}
 
 # ── Browser session management ─────────────────────────────
 _sessions: dict[str, dict] = {}

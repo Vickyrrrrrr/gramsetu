@@ -43,7 +43,6 @@ from backend.orchestrator.flow import process_message as v3_process_message
 from backend.orchestrator.models import GraphStatus
 from backend.integrations.security import api_limiter, sanitize_input, validate_otp_input
 from backend.integrations.schemes import discover_schemes
-from backend.voice_tts import text_to_speech
 from backend.services.session_store import (
     get_chat_session,
     save_chat_session,
