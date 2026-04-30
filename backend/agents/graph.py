@@ -258,11 +258,31 @@ async def identity_verify_node(state: GramSetuState) -> GramSetuState:
                 state.get("user_id", ""),
             )
         else:
-            state["response"] = await _localized(
-                f"⚠️ *पहचान सत्यापन विफल*\n\n{'; '.join(result.get('checks_failed', []))}\n\nकृपया सही आधार नंबर भेजें।",
-                f"⚠️ *Identity Verification Failed*\n\n{'; '.join(result.get('checks_failed', []))}\n\nPlease send a valid Aadhaar number.",
-                lang,
+            # Show helpful retry — checksum failure is usually a typo
+            failures = result.get('checks_failed', [])
+            saran_msg = (
+                "⚠️ *आधार नंबर की जाँच पूरी नहीं हुई*\n\n"
+                + "\n".join(f"  • {f}" for f in failures[:2])
+                + "\n\nकृपया अपना 12-अंकीय आधार नंबर दोबारा टाइप करें।"
             )
+            eng_msg = (
+                "⚠️ *Aadhaar verification incomplete*\n\n"
+                + "\n".join(f"  • {f}" for f in failures[:2])
+                + "\n\nPlease re-type your 12-digit Aadhaar number carefully."
+            )
+            # If only checksum failed (likely typo), be more encouraging
+            if len(failures) == 1 and "checksum" in failures[0].lower():
+                saran_msg = (
+                    "⚠️ आधार नंबर का चेकसम सही नहीं है।\n\n"
+                    "हो सकता है कोई अंक गलत टाइप हुआ हो।\n"
+                    "कृपया अपना 12-अंकीय आधार नंबर ध्यान से दोबारा भेजें।"
+                )
+                eng_msg = (
+                    "⚠️ Aadhaar checksum didn't match.\n\n"
+                    "A single mistyped digit can cause this.\n"
+                    "Please send your 12-digit Aadhaar again carefully."
+                )
+            state["response"] = await _localized(saran_msg, eng_msg, lang)
             state["status"] = GraphStatus.WAIT_USER.value
             state["next_node"] = "identity_verify"
     else:
