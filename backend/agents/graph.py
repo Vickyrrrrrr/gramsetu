@@ -317,20 +317,23 @@ async def identity_verify_node(state: GramSetuState) -> GramSetuState:
 
 
 # ════════════════════════════════════════════════════════════
-# NODE 1.5: WHATSAPP PHONE CHALLENGE
+# NODE 1.5: MOBILE NUMBER CROSS-VERIFICATION
 # ════════════════════════════════════════════════════════════
 
 async def phone_challenge_node(state: GramSetuState) -> GramSetuState:
     """
-    Send a 6-digit challenge OTP to the WhatsApp user.
-    User must type it back to prove they CURRENTLY control this phone number.
-    This prevents someone from using another person's phone without consent.
+    Cross-verify: Is the WhatsApp number the same as the Aadhaar-linked mobile?
+    
+    The government portal sends its OWN OTP to the Aadhaar-linked mobile
+    at submission time — that's the REAL verification we can't bypass.
+    Here we just check consistency and warn if numbers differ.
     """
     start = time.time()
     user_id = state.get("user_id", "")
     lang = state.get("language", "hi")
     text = state.get("transcribed_text", "") or state.get("raw_message", "")
-    existing_otp = state.get("challenge_otp", "")
+    whatsapp_phone = state.get("user_phone", "")
+    existing_mobile = state.get("challenge_otp", "")  # reused field for aadhaar mobile
 
     # If already passed phone challenge, skip
     from backend.identity_verifier import is_phone_challenge_passed
@@ -339,57 +342,82 @@ async def phone_challenge_node(state: GramSetuState) -> GramSetuState:
         state["current_node"] = "phone_challenge"
         return state
 
-    # ── User is responding with OTP ─────────────────────────
-    if existing_otp:
-        from backend.identity_verifier import verify_challenge_otp
-        valid, msg = verify_challenge_otp(user_id, text.strip())
-        if valid:
-            state["identity_verified"] = True
-            state["challenge_otp"] = ""
-            state["response"] = await _localized(
-                "✅ *फ़ोन सत्यापन पूर्ण!*\n\nआपका नंबर इस सत्र के लिए सत्यापित हो गया है।\nअब मैं आपका फ़ॉर्म भरूँगा।",
-                "✅ *Phone Verified!*\n\nYour number is confirmed for this session.\nNow I'll fill your form.",
-                lang,
-            )
-            state["next_node"] = "detect_intent"
-            state["status"] = GraphStatus.ACTIVE.value
+    # ── User responded with their Aadhaar-linked mobile ──────
+    if existing_mobile:
+        import re as _re
+        mobile_match = _re.search(r'(\+?91[\s-]?)?([6-9]\d{9})', text.strip())
+        if mobile_match:
+            provided_mobile = "+91" + mobile_match.group(2) if not mobile_match.group(1) else mobile_match.group(1).replace(" ", "") + mobile_match.group(2)
+            whatsapp_clean = whatsapp_phone.replace("+", "").replace(" ", "")
+            provided_clean = provided_mobile.replace("+", "").replace(" ", "")
+
+            if whatsapp_clean and whatsapp_clean[-10:] == provided_clean[-10:]:
+                # Numbers match — identity confirmed
+                from backend.identity_verifier import generate_challenge_otp
+                generate_challenge_otp(user_id)  # mark as verified via internal OTP
+                from backend.identity_verifier import verify_challenge_otp
+                verify_challenge_otp(user_id, "CONFIRMED_VIA_MOBILE_MATCH")
+
+                state["identity_verified"] = True
+                state["challenge_otp"] = ""
+                state["response"] = await _localized(
+                    "✅ *पहचान सत्यापित!*\n\n"
+                    "आपका WhatsApp नंबर और आधार से जुड़ा मोबाइल नंबर मेल खाते हैं।\n"
+                    "आपकी पहचान इस सत्र के लिए पुष्टि की गई है।\n\n"
+                    "अब बताइए — आपको कौन सा फ़ॉर्म भरना है?",
+                    "✅ *Identity Verified!*\n\n"
+                    "Your WhatsApp number matches your Aadhaar-linked mobile.\n"
+                    "Your identity is confirmed for this session.\n\n"
+                    "Now tell me — which form do you need?",
+                    lang,
+                )
+                state["next_node"] = "detect_intent"
+                state["status"] = GraphStatus.ACTIVE.value
+            else:
+                # Numbers don't match — warn but don't block
+                state["response"] = await _localized(
+                    f"⚠️ *मोबाइल नंबर मेल नहीं खाते*\n\n"
+                    f"• WhatsApp नंबर: +91{whatsapp_clean[-10:] if whatsapp_clean else '?'}\n"
+                    f"• आधार से जुड़ा नंबर: {provided_mobile}\n\n"
+                    f"👉 सुनिश्चित करें कि आधार से जुड़ा सही नंबर डालें।\n"
+                    f"_सरकारी पोर्टल OTP आपके आधार से जुड़े नंबर पर ही भेजेगा।_",
+                    f"⚠️ *Mobile numbers do not match*\n\n"
+                    f"• WhatsApp: +91{whatsapp_clean[-10:] if whatsapp_clean else '?'}\n"
+                    f"• Aadhaar-linked: {provided_mobile}\n\n"
+                    f"👉 Make sure you provide the correct number linked to your Aadhaar.\n"
+                    f"_The government portal will send OTP to your Aadhaar-linked number._",
+                    lang,
+                )
+                state["challenge_otp"] = ""  # reset to re-ask
+                state["status"] = GraphStatus.WAIT_USER.value
+                state["next_node"] = "phone_challenge"
         else:
             state["response"] = await _localized(
-                f"❌ {msg}\n\nकृपया सही OTP भेजें।",
-                f"❌ {msg}\n\nPlease send the correct OTP.",
+                "⚠️ मोबाइल नंबर का फ़ॉर्मेट सही नहीं है। कृपया 10-अंकीय नंबर भेजें (जैसे: 9876543210)।",
+                "⚠️ Invalid mobile format. Please send a 10-digit number (e.g. 9876543210).",
                 lang,
             )
-            state["challenge_otp_attempts"] = state.get("challenge_otp_attempts", 0) + 1
-            if state["challenge_otp_attempts"] >= 3:
-                state["challenge_otp"] = ""
-                state["challenge_otp_attempts"] = 0
             state["status"] = GraphStatus.WAIT_USER.value
             state["next_node"] = "phone_challenge"
         state["current_node"] = "phone_challenge"
         return state
 
-    # ── Generate & send new OTP — will be sent via webhook response ──
-    from backend.identity_verifier import generate_challenge_otp
-    otp = generate_challenge_otp(user_id)
-    state["challenge_otp"] = otp
-
+    # ── Ask for Aadhaar-linked mobile number ─────────────────
+    state["challenge_otp"] = "awaiting"  # mark that we're waiting
     state["response"] = await _localized(
-        f"🔐 *सुरक्षा जाँच — फ़ोन सत्यापन*\n\n"
-        f"यह सुनिश्चित करने के लिए कि यह फ़ॉर्म आप ही भर रहे हैं, "
-        f"कृपया यह कोड WhatsApp पर भेजें:\n\n"
-        f"*{otp}*\n\n"
-        f"_यह कोड 5 मिनट में समाप्त हो जाएगा।_",
-        f"🔐 *Security Check — Phone Verification*\n\n"
-        f"To confirm you're filling this form, "
-        f"please reply with this code on WhatsApp:\n\n"
-        f"*{otp}*\n\n"
-        f"_This code expires in 5 minutes._",
+        "📱 *आख़िरी चरण — मोबाइल सत्यापन*\n\n"
+        "आपके *आधार कार्ड* से कौन सा मोबाइल नंबर जुड़ा है?\n\n"
+        "कृपया वह 10-अंकीय नंबर भेजें।\n\n"
+        "_यह ज़रूरी है क्योंकि सरकारी पोर्टल आपके आधार से जुड़े नंबर पर OTP भेजेगा।_",
+        "📱 *Final Step — Mobile Verification*\n\n"
+        "Which mobile number is linked to your *Aadhaar card*?\n\n"
+        "Please send that 10-digit number.\n\n"
+        "_This is important because the government portal sends OTP to your Aadhaar-linked number._",
         lang,
     )
     state["status"] = GraphStatus.WAIT_USER.value
     state["next_node"] = "phone_challenge"
     state["current_node"] = "phone_challenge"
-    state["challenge_otp_attempts"] = 0
     return state
 
 

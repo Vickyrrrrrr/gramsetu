@@ -274,9 +274,15 @@ def generate_challenge_otp(user_id: str) -> str:
 
 def verify_challenge_otp(user_id: str, user_otp: str) -> tuple[bool, str]:
     """
-    Verify the WhatsApp challenge OTP.
-    Returns (is_valid, message).
+    Verify the challenge — either from a generated OTP or direct confirmation
+    when WhatsApp number matches Aadhaar-linked mobile.
     """
+    # Direct confirmation path (e.g., mobile numbers matched)
+    if user_otp == "CONFIRMED_VIA_MOBILE_MATCH":
+        _phone_challenges[user_id] = {"verified": True, "expiry": time.time() + _CHALLENGE_TTL, "attempts": 0, "otp": "confirmed"}
+        _verified_users[user_id] = True
+        return True, "Mobile numbers match. Identity confirmed."
+
     challenge = _phone_challenges.get(user_id, {})
     if not challenge:
         return False, "No active challenge. Please start again."
