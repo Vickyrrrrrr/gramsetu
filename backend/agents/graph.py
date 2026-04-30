@@ -723,17 +723,25 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
     history = state.get("conversation_history", [])
     history.append({"role": "user", "text": text})
     if len(history) > 20:
-        history = history[-20:]  # Keep last 20 exchanges
+        history = history[-20:]
     state["conversation_history"] = history
 
     # Try LLM extraction with context of already-collected data + history
-    from backend.digilocker_client import extract_with_llm, _get_form_template
+    from backend.digilocker_client import extract_with_llm, _get_form_template, _manual_extract
 
     existing_data = state.get("form_data", {})
     user_context = text if text else ""
+    collected_this_round = False
 
     if user_context:
-        # Include conversation history AND existing data for full context
+        # STEP 1: Quick regex extraction (catches email, phone, address immediately)
+        quick = _manual_extract(user_context, _get_form_template(form_type))
+        quick_data = quick.get("extracted_data", {})
+        if quick_data:
+            existing_data.update(quick_data)
+            collected_this_round = True
+
+        # STEP 2: LLM extraction for deeper understanding
         history_summary = "\n".join(
             f"{h['role']}: {h['text'][:200]}" for h in history[-10:]
         )
@@ -742,16 +750,40 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
             f"ALREADY COLLECTED DATA: {json.dumps(existing_data, ensure_ascii=False)}\n\n"
             f"NEW USER MESSAGE: {user_context}"
         )
-        extraction = await extract_with_llm(context_with_history, form_type)
-        extracted = extraction.get("extracted_data", {})
-        if extracted:
-            existing_data.update(extracted)
-            state["form_data"] = existing_data
-            state["confidence_scores"].update(extraction.get("confidence_scores", {}))
+        try:
+            extraction = await extract_with_llm(context_with_history, form_type)
+            extracted = extraction.get("extracted_data", {})
+            if extracted:
+                existing_data.update(extracted)
+                collected_this_round = True
+        except Exception:
+            pass  # LLM failed, use what regex caught
+
+        state["form_data"] = existing_data
+        state["confidence_scores"].update(
+            {k: 0.7 for k in quick_data}
+        )
 
     # Check what's still missing
     required = _get_form_template(form_type)
     missing = [f for f in required if f not in existing_data or not existing_data[f]]
+    collect_attempts = state.get("challenge_otp_attempts", 0)
+
+    # Prevent infinite loops: if nothing was collected this round, force-advance
+    if not collected_this_round and missing:
+        collect_attempts += 1
+        state["challenge_otp_attempts"] = collect_attempts
+        if collect_attempts >= 3:
+            # Give up trying to collect — use what we have
+            state["response"] = await _localized(
+                "आगे बढ़ते हैं। जो जानकारी मिली है, उसी से फ़ॉर्म भरता हूँ।",
+                "Let's proceed with what you've shared so far.",
+                lang,
+            )
+            state["next_node"] = "validate_confirm"
+            state["status"] = GraphStatus.ACTIVE.value
+            state["current_node"] = "collect_data"
+            return state
 
     if missing:
         missing_labels = [f.replace("_", " ").title() for f in missing[:6]]
@@ -768,6 +800,7 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
     else:
         state["next_node"] = "validate_confirm"
         state["status"] = GraphStatus.ACTIVE.value
+        state["challenge_otp_attempts"] = 0  # reset loop counter
 
     state["current_node"] = "collect_data"
     state.setdefault("audit_entries", []).append({
@@ -805,6 +838,21 @@ async def validate_confirm_node(state: GramSetuState) -> GramSetuState:
     router = get_router()
     validation_results = []
     errors = []
+
+    # Normalize all values first (strip spaces, clean Aadhaar format)
+    import re as _re
+    for field, value in list(form_data.items()):
+        if isinstance(value, str):
+            if "aadhaar" in field.lower():
+                form_data[field] = _re.sub(r'[\s\-]', '', value)
+            elif "mobile" in field.lower() or "phone" in field.lower():
+                form_data[field] = _re.sub(r'[\s\-\+]', '', value)
+            elif "pincode" in field.lower() or "pin_code" in field.lower():
+                form_data[field] = _re.sub(r'\s', '', value)
+        elif isinstance(value, dict):
+            for sub_k, sub_v in value.items():
+                if isinstance(sub_v, str) and "aadhaar" in sub_k.lower():
+                    value[sub_k] = _re.sub(r'[\s\-]', '', sub_v)
 
     for field, value in list(form_data.items()):
         if isinstance(value, dict):

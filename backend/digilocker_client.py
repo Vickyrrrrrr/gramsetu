@@ -150,7 +150,7 @@ def _manual_extract(text: str, required_fields: list[str]) -> dict:
     conf = {}
 
     # Aadhaar
-    m = re.search(r'\b([2-9]\d{2}[\s-]?\d{4}[\s-]?\d{4})\b', text)
+    m = re.search(r'\b([2-9]\d{3}[\s-]?\d{4}[\s-]?\d{4})\b', text)
     if m:
         data["aadhaar_number"] = re.sub(r'[\s-]', '', m.group(1))
         conf["aadhaar_number"] = 0.9
@@ -160,6 +160,12 @@ def _manual_extract(text: str, required_fields: list[str]) -> dict:
     if m:
         data["mobile_number"] = m.group(1)
         conf["mobile_number"] = 0.9
+
+    # Email
+    m = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', text)
+    if m:
+        data["email"] = m.group(0)
+        conf["email"] = 0.7
 
     # PIN code
     m = re.search(r'\b([1-9]\d{5})\b', text)
@@ -172,6 +178,27 @@ def _manual_extract(text: str, required_fields: list[str]) -> dict:
     if m:
         data["ifsc_code"] = m.group(1).upper()
         conf["ifsc_code"] = 0.8
+
+    # Address / city — extract text after "lucknow", "address:", "city:", comma-separated locations
+    # Simple: take any non-numeric, non-email text after common separators
+    parts = re.split(r'[,;|]', text)
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        # Skip if it's a number, email, or already extracted
+        if re.match(r'^[\d\s\-+.@]+$', part):
+            continue
+        if "@" in part:
+            continue
+        # This looks like an address/city/name
+        if len(part) >= 2 and len(part) < 100:
+            key = "address" if "address" in required_fields else (
+                "applicant_name" if "applicant_name" in required_fields else "full_name"
+            )
+            if key not in data or conf.get(key, 0) < 0.5:
+                data[key] = part
+                conf[key] = 0.4
 
     missing = [f for f in required_fields if f not in data]
 
