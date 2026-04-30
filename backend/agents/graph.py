@@ -225,11 +225,17 @@ async def identity_verify_node(state: GramSetuState) -> GramSetuState:
         state.get("user_id", ""),
     )
 
-    # If already verified this session, skip
+    # If already verified this session, skip to detect_intent
     from backend.identity_verifier import is_user_verified
     if is_user_verified(user_id):
-        state["next_node"] = "phone_challenge"
+        state["next_node"] = "detect_intent"
         state["identity_verified"] = True
+        state["current_node"] = "identity_verify"
+        return state
+
+    # If mid-challenge (OTP sent, waiting for user), skip to challenge node
+    if state.get("challenge_otp"):
+        state["next_node"] = "phone_challenge"
         state["current_node"] = "identity_verify"
         return state
 
@@ -410,7 +416,17 @@ async def transcribe_node(state: GramSetuState) -> GramSetuState:
         state["transcribed_text"] = state.get("raw_message", "")
 
     state["current_node"] = "transcribe"
-    state["next_node"] = "identity_verify" if not state.get("identity_verified") else "phone_challenge"
+    # ── Route: if in phone challenge, go there. If identity verified, skip to intent ──
+    if state.get("challenge_otp"):
+        state["next_node"] = "phone_challenge"
+    elif state.get("identity_verified") and state.get("form_type"):
+        state["next_node"] = "detect_intent"
+    elif state.get("identity_verified"):
+        state["next_node"] = "detect_intent"
+    elif not state.get("identity_verified"):
+        state["next_node"] = "identity_verify"
+    else:
+        state["next_node"] = "detect_intent"
     state.setdefault("audit_entries", []).append({
         "agent": "transcriber", "node": "transcribe",
         "action": "asr_transcribe",
