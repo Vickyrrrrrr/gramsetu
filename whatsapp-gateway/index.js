@@ -77,6 +77,8 @@ let reconnectAttempts = 0
 const MAX_RECONNECT = 20
 const messageQueue = []
 let processingQueue = false
+let currentQr = null       // Latest QR string for HTTP display
+let connectionState = 'connecting'
 
 // ── MESSAGE QUEUE WORKER ───────────────────────────────────
 async function processQueue() {
@@ -401,7 +403,6 @@ async function connectToWhatsApp() {
 
     sock = makeWASocket({
         auth: state,
-        printQRInTerminal: true,
         logger,
         defaultQueryTimeoutMs: 60000,
         markOnlineOnConnect: true,
@@ -409,18 +410,43 @@ async function connectToWhatsApp() {
         generateHighQualityLinkPreview: true,
     })
 
+    // ── Use pairing code (more reliable than QR on some networks) ──
+    if (!state.creds?.me) {
+        // Request pairing code — works when QR fails with 405
+        const phoneNumber = process.env.WHATSAPP_ADMIN_PHONE || ''
+        if (phoneNumber) {
+            setTimeout(async () => {
+                try {
+                    const code = await sock.requestPairingCode(phoneNumber)
+                    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+                    logger.info(`  📱 Pairing code: ${code}`)
+                    logger.info('  Enter this code on your phone:')
+                    logger.info('  WhatsApp → Settings → Linked Devices → Link with code')
+                    logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+                    currentQr = null
+                } catch (e) {
+                    logger.warn(`Pairing code request failed: ${e.message}`)
+                }
+            }, 2000)
+        }
+    }
+
     // ── QR Code ───────────────────────────────────────────
     sock.ev.on('connection.update', ({ qr, connection, lastDisconnect }) => {
         if (qr) {
-            qrcode.generate(qr, { small: true })
+            currentQr = qr
+            connectionState = 'qr'
             logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-            logger.info('  SCAN this QR code with WhatsApp on your phone')
+            logger.info('  📱 SCAN the QR code at:')
+            logger.info(`  http://localhost:${GATEWAY_PORT}/qr`)
             logger.info('  Settings → Linked Devices → Link a Device')
             logger.info('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
         }
 
         if (connection === 'open') {
             reconnectAttempts = 0
+            currentQr = null
+            connectionState = 'connected'
             logger.info('✅ WhatsApp connected!')
             logger.info(`   Bridge: ${GRAMSETU_URL}`)
 
@@ -492,9 +518,34 @@ async function connectToWhatsApp() {
     return sock
 }
 
-// ── HEALTH SERVER (for Docker healthcheck + public status) ──
+// ── HEALTH SERVER (for Docker healthcheck + QR display) ──
 const healthServer = http.createServer((req, res) => {
-    if (req.url === '/health') {
+    if (req.url === '/qr') {
+        if (currentQr) {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+            res.end(`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Scan QR - GramSetu WhatsApp</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;background:#F7F6F3;margin:0}
+.card{background:#fff;padding:40px;border-radius:16px;text-align:center;box-shadow:0 2px 20px rgba(0,0,0,.08);max-width:420px}
+h1{font-size:20px;margin:0 0 8px;color:#0C0C0C}p{color:#6B6B6B;font-size:14px;margin:0 0 24px}
+#qr{margin:0 auto 16px;display:inline-block}
+.steps{text-align:left;font-size:13px;color:#444;line-height:1.8}
+.steps span{display:inline-block;width:22px;height:22px;border-radius:50%;background:#0C0C0C;color:#F7F6F3;text-align:center;line-height:22px;font-size:12px;font-weight:700;margin-right:8px}</style></head><body>
+<div class="card"><h1>🤖 GramSetu WhatsApp</h1><p>Scan this QR code with WhatsApp on your phone</p>
+<div id="qr"></div>
+<div class="steps">
+<span>1</span> Open WhatsApp on your phone<br>
+<span>2</span> Go to Settings → Linked Devices<br>
+<span>3</span> Tap "Link a Device"<br>
+<span>4</span> Point your phone at this QR code<br>
+<span>5</span> Done — the bot is live!
+</div></div>
+<script>new QRCode(document.getElementById('qr'),{text:'${currentQr}',width:220,height:220,colorDark:'#0C0C0C',colorLight:'#F7F6F3'})</script></body></html>`)
+        } else {
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
+            res.end(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>GramSetu WhatsApp</title><style>body{font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;background:#F7F6F3} .card{background:#fff;padding:40px;border-radius:16px;text-align:center;box-shadow:0 2px 20px rgba(0,0,0,.08)}h1{font-size:20px;color:#0C0C0C}p{color:#6B6B6B;font-size:14px}</style></head><body><div class="card"><h1>✅ GramSetu WhatsApp is Connected</h1><p>Send a WhatsApp message to the linked number to start.</p></div></body></html>`)
+        }
+    } else if (req.url === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
             status: 'ok',
