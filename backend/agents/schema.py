@@ -79,6 +79,9 @@ class GramSetuState(TypedDict, total=False):
 
     # ── Security ──────────────────────────────────────────────
     identity_verified: bool     # Aadhaar + face verification passed
+    challenge_otp: str          # WhatsApp challenge OTP for phone proof
+    challenge_otp_attempts: int # Number of OTP attempts
+    consent_confirmed: bool     # User explicitly confirmed submission
     review_required: bool
     review_reasons: list
     review_checklist: list

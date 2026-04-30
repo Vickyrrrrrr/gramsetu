@@ -228,7 +228,7 @@ async def identity_verify_node(state: GramSetuState) -> GramSetuState:
     # If already verified this session, skip
     from backend.identity_verifier import is_user_verified
     if is_user_verified(user_id):
-        state["next_node"] = "detect_intent"
+        state["next_node"] = "phone_challenge"
         state["identity_verified"] = True
         state["current_node"] = "identity_verify"
         return state
@@ -311,6 +311,96 @@ async def identity_verify_node(state: GramSetuState) -> GramSetuState:
 
 
 # ════════════════════════════════════════════════════════════
+# NODE 1.5: WHATSAPP PHONE CHALLENGE
+# ════════════════════════════════════════════════════════════
+
+async def phone_challenge_node(state: GramSetuState) -> GramSetuState:
+    """
+    Send a 6-digit challenge OTP to the WhatsApp user.
+    User must type it back to prove they CURRENTLY control this phone number.
+    This prevents someone from using another person's phone without consent.
+    """
+    start = time.time()
+    user_id = state.get("user_id", "")
+    lang = state.get("language", "hi")
+    text = state.get("transcribed_text", "") or state.get("raw_message", "")
+    existing_otp = state.get("challenge_otp", "")
+
+    # If already passed phone challenge, skip
+    from backend.identity_verifier import is_phone_challenge_passed
+    if is_phone_challenge_passed(user_id):
+        state["next_node"] = "detect_intent"
+        state["current_node"] = "phone_challenge"
+        return state
+
+    # ── User is responding with OTP ─────────────────────────
+    if existing_otp:
+        from backend.identity_verifier import verify_challenge_otp
+        valid, msg = verify_challenge_otp(user_id, text.strip())
+        if valid:
+            state["identity_verified"] = True
+            state["challenge_otp"] = ""
+            state["response"] = await _localized(
+                "✅ *फ़ोन सत्यापन पूर्ण!*\n\nआपका नंबर इस सत्र के लिए सत्यापित हो गया है।\nअब मैं आपका फ़ॉर्म भरूँगा।",
+                "✅ *Phone Verified!*\n\nYour number is confirmed for this session.\nNow I'll fill your form.",
+                lang,
+            )
+            state["next_node"] = "detect_intent"
+            state["status"] = GraphStatus.ACTIVE.value
+        else:
+            state["response"] = await _localized(
+                f"❌ {msg}\n\nकृपया सही OTP भेजें।",
+                f"❌ {msg}\n\nPlease send the correct OTP.",
+                lang,
+            )
+            state["challenge_otp_attempts"] = state.get("challenge_otp_attempts", 0) + 1
+            if state["challenge_otp_attempts"] >= 3:
+                state["challenge_otp"] = ""
+                state["challenge_otp_attempts"] = 0
+            state["status"] = GraphStatus.WAIT_USER.value
+            state["next_node"] = "phone_challenge"
+        state["current_node"] = "phone_challenge"
+        return state
+
+    # ── Generate & send new OTP ─────────────────────────────
+    from backend.identity_verifier import generate_challenge_otp
+    otp = generate_challenge_otp(user_id)
+    state["challenge_otp"] = otp
+
+    # Send OTP via WhatsApp Meta API
+    try:
+        from backend.api.routes.meta_webhook import send_meta_message
+        await send_meta_message(user_id,
+            f"🔐 *GramSetu Security Check*\n\n"
+            f"To confirm you're the owner of this WhatsApp number, "
+            f"please reply with this code:\n\n"
+            f"*{otp}*\n\n"
+            f"_This code expires in 5 minutes._"
+        )
+    except Exception:
+        pass  # Will be sent back to user via graph response
+
+    state["response"] = await _localized(
+        f"🔐 *सुरक्षा जाँच — फ़ोन सत्यापन*\n\n"
+        f"यह सुनिश्चित करने के लिए कि यह फ़ॉर्म आप ही भर रहे हैं, "
+        f"कृपया यह कोड WhatsApp पर भेजें:\n\n"
+        f"*{otp}*\n\n"
+        f"_यह कोड 5 मिनट में समाप्त हो जाएगा।_",
+        f"🔐 *Security Check — Phone Verification*\n\n"
+        f"To confirm you're filling this form, "
+        f"please reply with this code on WhatsApp:\n\n"
+        f"*{otp}*\n\n"
+        f"_This code expires in 5 minutes._",
+        lang,
+    )
+    state["status"] = GraphStatus.WAIT_USER.value
+    state["next_node"] = "phone_challenge"
+    state["current_node"] = "phone_challenge"
+    state["challenge_otp_attempts"] = 0
+    return state
+
+
+# ════════════════════════════════════════════════════════════
 # NODE 2: TRANSCRIBE
 # ════════════════════════════════════════════════════════════
 
@@ -333,7 +423,7 @@ async def transcribe_node(state: GramSetuState) -> GramSetuState:
         state["transcribed_text"] = state.get("raw_message", "")
 
     state["current_node"] = "transcribe"
-    state["next_node"] = "identity_verify" if not state.get("identity_verified") else "detect_intent"
+    state["next_node"] = "identity_verify" if not state.get("identity_verified") else "phone_challenge"
     state.setdefault("audit_entries", []).append({
         "agent": "transcriber", "node": "transcribe",
         "action": "asr_transcribe",
@@ -654,6 +744,28 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
         user_id,
     )
 
+    # ── CONSENT CHECK: User must explicitly confirm ─────────────
+    if not state.get("consent_confirmed"):
+        state["response"] = await _localized(
+            "⚖️ *अंतिम पुष्टि आवश्यक*\n\n"
+            "मैं यह पुष्टि करता/करती हूँ कि:\n"
+            "• यह फ़ॉर्म मेरे द्वारा भरा जा रहा है\n"
+            "• सभी जानकारी सही और मेरी अपनी है\n"
+            "• मैं किसी अन्य व्यक्ति का प्रतिरूपण नहीं कर रहा/रही\n\n"
+            "👉 आगे बढ़ने के लिए *I CONFIRM* भेजें",
+            "⚖️ *Final Confirmation Required*\n\n"
+            "I confirm that:\n"
+            "• I am filling this form for myself\n"
+            "• All information provided is true and mine\n"
+            "• I am not impersonating anyone else\n\n"
+            "👉 Send *I CONFIRM* to proceed",
+            lang,
+        )
+        state["status"] = GraphStatus.WAIT_USER.value
+        state["next_node"] = "fill_form"
+        state["current_node"] = "fill_form"
+        return state
+
     # ── OTP resume path ───────────────────────────────────────
     if state.get("otp_value"):
         otp = state["otp_value"]
@@ -767,7 +879,7 @@ def route_next(state: GramSetuState) -> str:
     ):
         return END
 
-    valid_nodes = ("identity_verify", "transcribe", "detect_intent",
+    valid_nodes = ("identity_verify", "phone_challenge", "transcribe", "detect_intent",
                    "collect_data", "validate_confirm", "fill_form")
     if next_node in valid_nodes:
         return next_node
@@ -781,6 +893,7 @@ def route_next(state: GramSetuState) -> str:
 def build_graph() -> StateGraph:
     graph = StateGraph(GramSetuState)
     graph.add_node("identity_verify", identity_verify_node)
+    graph.add_node("phone_challenge", phone_challenge_node)
     graph.add_node("transcribe", transcribe_node)
     graph.add_node("detect_intent", detect_intent_node)
     graph.add_node("collect_data", collect_data_node)
@@ -789,6 +902,7 @@ def build_graph() -> StateGraph:
 
     graph.set_entry_point("transcribe")
     graph.add_conditional_edges("identity_verify", route_next)
+    graph.add_conditional_edges("phone_challenge", route_next)
     graph.add_conditional_edges("transcribe", route_next)
     graph.add_conditional_edges("detect_intent", route_next)
     graph.add_conditional_edges("collect_data", route_next)
@@ -921,6 +1035,18 @@ async def _process(compiled, user_id, user_phone, message, message_type,
 
         # ── WAIT_USER → collect data and continue ─────────────
         if status == GraphStatus.WAIT_USER.value:
+            # ── Handle consent confirmation ──────────────────
+            consent_words = {"i confirm", "i agree", "confirm", "yes i confirm",
+                             "मैं पुष्टि करता", "मैं पुष्टि करती", "सहमत", "agree"}
+            next_n = existing_state.get("next_node", "")
+            if next_n == "fill_form" and text.lower().strip() in consent_words:
+                existing_state["consent_confirmed"] = True
+                existing_state["status"] = GraphStatus.ACTIVE.value
+                existing_state["last_active"] = time.time()
+                result = await fill_form_node(existing_state)
+                await compiled.aupdate_state(config, result, as_node="fill_form")
+                return _format_result(result, session_id)
+
             existing_state["raw_message"] = text
             existing_state["transcribed_text"] = text
             existing_state["message_type"] = message_type
@@ -939,6 +1065,8 @@ async def _process(compiled, user_id, user_phone, message, message_type,
         "current_node": "", "next_node": "transcribe",
         "response": "", "confirmation_summary": "",
         "otp_value": "", "identity_verified": False,
+        "challenge_otp": "", "challenge_otp_attempts": 0,
+        "consent_confirmed": False,
         "browser_launched": False, "portal_url": "",
         "screenshot_b64": "", "audit_entries": [], "pii_accessed": [],
         "last_active": time.time(), "receipt_ready": False,

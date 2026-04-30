@@ -24,10 +24,13 @@ from collections import defaultdict
 _verification_attempts: dict[str, list[float]] = defaultdict(list)
 _verified_users: dict[str, bool] = {}
 _identity_hashes: dict[str, str] = {}  # user_id → hash(aadhaar)
+_phone_challenges: dict[str, dict] = {}  # user_id → {otp, expiry, attempts}
 
 # Rate limit: max 5 verification attempts per user per hour
 _MAX_ATTEMPTS = 5
 _ATTEMPT_WINDOW = 3600  # 1 hour
+_CHALLENGE_TTL = 300  # 5 minutes for OTP challenge
+_MAX_CHALLENGE_ATTEMPTS = 3
 
 
 def _rate_check(user_id: str) -> bool:
@@ -246,6 +249,56 @@ async def verify_identity(user_id: str, aadhaar: str, face_photo: str = "", phon
 def is_user_verified(user_id: str) -> bool:
     """Check if a user has passed identity verification in this session."""
     return _verified_users.get(user_id, False)
+
+
+def is_phone_challenge_passed(user_id: str) -> bool:
+    """Check if user passed the WhatsApp phone challenge."""
+    return _phone_challenges.get(user_id, {}).get("verified", False)
+
+
+def generate_challenge_otp(user_id: str) -> str:
+    """
+    Generate a 6-digit OTP and store it for WhatsApp phone verification.
+    User must type this back within 5 minutes to prove they control this number.
+    """
+    import random
+    otp = ''.join(str(random.randint(0, 9)) for _ in range(6))
+    _phone_challenges[user_id] = {
+        "otp": otp,
+        "expiry": time.time() + _CHALLENGE_TTL,
+        "attempts": 0,
+        "verified": False,
+    }
+    return otp
+
+
+def verify_challenge_otp(user_id: str, user_otp: str) -> tuple[bool, str]:
+    """
+    Verify the WhatsApp challenge OTP.
+    Returns (is_valid, message).
+    """
+    challenge = _phone_challenges.get(user_id, {})
+    if not challenge:
+        return False, "No active challenge. Please start again."
+
+    if time.time() > challenge.get("expiry", 0):
+        _phone_challenges.pop(user_id, None)
+        return False, "Challenge expired. Please start again."
+
+    attempts = challenge.get("attempts", 0)
+    if attempts >= _MAX_CHALLENGE_ATTEMPTS:
+        _phone_challenges.pop(user_id, None)
+        return False, "Too many attempts. Please start again."
+
+    challenge["attempts"] = attempts + 1
+
+    if user_otp.strip() == challenge.get("otp", ""):
+        challenge["verified"] = True
+        _verified_users[user_id] = True
+        return True, "Phone verified. Identity confirmed for this session."
+    else:
+        remaining = _MAX_CHALLENGE_ATTEMPTS - attempts - 1
+        return False, f"Incorrect OTP. {remaining} attempts remaining." if remaining > 0 else "Locked. Please start again."
 
 
 def get_identity_proof(user_id: str) -> str:
