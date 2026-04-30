@@ -117,43 +117,42 @@ async def _broadcast_screenshot(session_id: str, screenshot_b64: str,
 
 
 async def _localized(msg_hi: str, msg_en: str, lang: str) -> str:
-    if lang == "hi":
-        return msg_hi
-    if lang == "en":
-        return msg_en
-    # For any other language, use LLM translation
-    try:
-        from backend.llm_client import chat_translation
-        result = await chat_translation(msg_en, "en", lang)
-        return result or msg_en
-    except Exception:
-        return msg_en
+    """Instant ACKs only — keep these for YES/NO, OTP, PIN prompts. Everything else uses _llm_respond."""
+    return msg_hi if lang == "hi" else msg_en
 
 
-async def _llm_generate(message_key: str, context: dict, lang: str) -> str:
+async def _llm_respond(key_message: str, context: dict, lang: str, user_id: str = "") -> str:
     """
-    Generate a natural-language response via LLM in the user's language.
+    Generate a natural, contextual response via Sarvam LLM.
     Falls back to _localized if LLM is unavailable.
+    Maintains WhatsApp-friendly formatting but sounds human.
     """
+    import json as _j
     try:
         from backend.llm_client import chat_conversational
-        ctx = json.dumps(context, ensure_ascii=False)[:500]
-        prompt = (
-            f"You are GramSetu, an AI government form assistant for rural India. "
-            f"Respond naturally in {'Hindi' if lang == 'hi' else ('English' if lang == 'en' else 'the user language')}. "
-            f"Context: {ctx}\n\n"
-            f"Key message: {message_key}\n\n"
-            f"Be warm, concise, and helpful. Use WhatsApp-friendly formatting (*bold*). "
-            f"2-4 sentences max."
-        )
-        result = await chat_conversational(
-            [{"role": "user", "content": prompt}], temperature=0.6, max_tokens=256
-        )
-        if result:
+        ctx_json = _j.dumps(context, ensure_ascii=False, default=str)[:600]
+
+        messages = [
+            {"role": "system", "content": (
+                "You are GramSetu, a warm, helpful AI assistant for rural Indian citizens. "
+                "You help fill government forms via WhatsApp and web. "
+                "Respond conversationally in the user's language. "
+                "Use WhatsApp-friendly formatting: *bold* for emphasis. "
+                "Be concise — 2-5 sentences max. "
+                "Sound like a helpful government officer, not a robot. "
+                "Include emoji sparingly for warmth. "
+                f"Current language: {lang}. Context: {ctx_json}"
+            )},
+            {"role": "user", "content": key_message},
+        ]
+        result = await chat_conversational(messages, temperature=0.6, max_tokens=300)
+        if result and len(result.strip()) > 5:
             return result.strip()
-    except Exception:
-        pass
-    return ""
+    except Exception as e:
+        print(f"[LLM Respond] Failed: {e}")
+
+    # Fallback — use _localized with the key message as English
+    return key_message
 
 
 # ════════════════════════════════════════════════════════════
@@ -277,11 +276,11 @@ async def identity_verify_node(state: GramSetuState) -> GramSetuState:
 
         if result.get("verified"):
             state["identity_verified"] = True
-            state["next_node"] = "detect_intent"
-            state["response"] = await _localized(
-                "✅ *पहचान सत्यापित!*\n\nआधार वेरिफिकेशन पूर्ण। अब मैं आपका फ़ॉर्म भरूँगा।",
-                "✅ *Identity Verified!*\n\nAadhaar verification passed. Let me fill your form now.",
-                lang,
+            state["next_node"] = "phone_challenge"
+            state["response"] = await _llm_respond(
+                "Tell user their Aadhaar passed verification. Guide them to the next step.",
+                {"verified": True, "aadhaar_valid": True, "next": "phone_verification"},
+                lang, user_id,
             )
             await _broadcast_progress(
                 state.get("session_id", ""), _PROGRESS_STEPS[1], 0.25,
@@ -290,31 +289,12 @@ async def identity_verify_node(state: GramSetuState) -> GramSetuState:
                 state.get("user_id", ""),
             )
         else:
-            # Show helpful retry — checksum failure is usually a typo
             failures = result.get('checks_failed', [])
-            saran_msg = (
-                "⚠️ *आधार नंबर की जाँच पूरी नहीं हुई*\n\n"
-                + "\n".join(f"  • {f}" for f in failures[:2])
-                + "\n\nकृपया अपना 12-अंकीय आधार नंबर दोबारा टाइप करें।"
+            state["response"] = await _llm_respond(
+                "Tell user their Aadhaar verification had issues. Ask them to try again carefully.",
+                {"failed_checks": failures, "attempt": "retry"},
+                lang, user_id,
             )
-            eng_msg = (
-                "⚠️ *Aadhaar verification incomplete*\n\n"
-                + "\n".join(f"  • {f}" for f in failures[:2])
-                + "\n\nPlease re-type your 12-digit Aadhaar number carefully."
-            )
-            # If only checksum failed (likely typo), be more encouraging
-            if len(failures) == 1 and "checksum" in failures[0].lower():
-                saran_msg = (
-                    "⚠️ आधार नंबर का चेकसम सही नहीं है।\n\n"
-                    "हो सकता है कोई अंक गलत टाइप हुआ हो।\n"
-                    "कृपया अपना 12-अंकीय आधार नंबर ध्यान से दोबारा भेजें।"
-                )
-                eng_msg = (
-                    "⚠️ Aadhaar checksum didn't match.\n\n"
-                    "A single mistyped digit can cause this.\n"
-                    "Please send your 12-digit Aadhaar again carefully."
-                )
-            state["response"] = await _localized(saran_msg, eng_msg, lang)
             state["status"] = GraphStatus.WAIT_USER.value
             state["next_node"] = "identity_verify"
     else:
@@ -378,44 +358,30 @@ async def phone_challenge_node(state: GramSetuState) -> GramSetuState:
             provided_clean = provided_mobile.replace("+", "").replace(" ", "")
 
             if whatsapp_clean and whatsapp_clean[-10:] == provided_clean[-10:]:
-                # Numbers match — check if security enrolled, else enroll
                 from backend.secure_enclave import has_security_enrolled
                 from backend.identity_verifier import generate_challenge_otp, verify_challenge_otp
                 generate_challenge_otp(user_id)
                 verify_challenge_otp(user_id, "CONFIRMED_VIA_MOBILE_MATCH")
-
                 state["identity_verified"] = True
                 state["challenge_otp"] = ""
 
                 if has_security_enrolled(user_id):
                     state["next_node"] = "detect_intent"
                     state["status"] = GraphStatus.ACTIVE.value
-                    state["response"] = await _localized(
-                        "✅ *पहचान सत्यापित!*\n\n"
-                        "आपका WhatsApp नंबर और आधार से जुड़ा मोबाइल नंबर मेल खाते हैं।\n"
-                        "अब बताइए — आपको कौन सा फ़ॉर्म भरना है?",
-                        "✅ *Identity Verified!*\n\n"
-                        "Your WhatsApp number matches your Aadhaar-linked mobile.\n"
-                        "Now tell me — which form do you need?",
-                        lang,
+                    state["response"] = await _llm_respond(
+                        "Tell user their WhatsApp and Aadhaar mobile numbers match. Identity confirmed. Ask what form they need.",
+                        {"mobile_match": True, "security_enrolled": True},
+        lang, state.get("user_id", ""),
                     )
                 else:
                     state["next_node"] = "security_enroll"
                     state["status"] = GraphStatus.ACTIVE.value
             else:
-                # Numbers don't match — warn but don't block
-                state["response"] = await _localized(
-                    f"⚠️ *मोबाइल नंबर मेल नहीं खाते*\n\n"
-                    f"• WhatsApp नंबर: +91{whatsapp_clean[-10:] if whatsapp_clean else '?'}\n"
-                    f"• आधार से जुड़ा नंबर: {provided_mobile}\n\n"
-                    f"👉 सुनिश्चित करें कि आधार से जुड़ा सही नंबर डालें।\n"
-                    f"_सरकारी पोर्टल OTP आपके आधार से जुड़े नंबर पर ही भेजेगा।_",
-                    f"⚠️ *Mobile numbers do not match*\n\n"
-                    f"• WhatsApp: +91{whatsapp_clean[-10:] if whatsapp_clean else '?'}\n"
-                    f"• Aadhaar-linked: {provided_mobile}\n\n"
-                    f"👉 Make sure you provide the correct number linked to your Aadhaar.\n"
-                    f"_The government portal will send OTP to your Aadhaar-linked number._",
-                    lang,
+                state["response"] = await _llm_respond(
+                    "Tell user their WhatsApp number doesn't match the Aadhaar-linked mobile they provided. "
+                    "Explain why this matters and ask them to double-check.",
+                    {"mobile_mismatch": True, "whatsapp": whatsapp_clean[-10:] if whatsapp_clean else "?"},
+        lang, state.get("user_id", ""),
                 )
                 state["challenge_otp"] = ""  # reset to re-ask
                 state["status"] = GraphStatus.WAIT_USER.value
@@ -742,10 +708,13 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
     text = state.get("transcribed_text", "")
     lang = state.get("language", "hi")
 
-    if state.get("form_type"):
-        state["next_node"] = "collect_data"
-        state["current_node"] = "detect_intent"
-        return state
+    # Generate a "THINK" message showing what we're about to do
+    prefix = await _llm_respond(
+        "Tell user you're about to analyze their request to understand what form they need. Be brief — 1 sentence.",
+        {"action": "detect_intent"},
+        lang, state.get("user_id", ""),
+    )
+    state["response"] = prefix if prefix else ""
 
     # ── LLM-PRIMARY intent classification ──────────────────
     detected = None
@@ -844,7 +813,22 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
     history = state.get("conversation_history", [])
     history.append({"role": "user", "text": text})
     if len(history) > 20:
-        history = history[-20:]
+        from backend.llm_client import chat_intent
+        try:
+            # Compress: summarize old history into key points
+            old_history = history[:-10]  # keep last 10 messages detailed
+            old_text = "\n".join(f"{h['role']}: {h['text'][:100]}" for h in old_history)
+            summary_result = await chat_intent(
+                [{"role": "system", "content": "Summarize this conversation history into 2-3 bullet points. Focus on: user's name, what form they need, what data has been collected, what's still missing. Return ONLY the bullet points."},
+                 {"role": "user", "content": old_text}],
+                temperature=0.1, max_tokens=150
+            )
+            if summary_result:
+                history = [{"role": "system", "text": f"Summary: {summary_result}"}] + history[-10:]
+            else:
+                history = history[-20:]  # fallback
+        except Exception:
+            history = history[-20:]  # fallback
     state["conversation_history"] = history
 
     # Try LLM extraction with context of already-collected data + history
@@ -1179,10 +1163,11 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
             )
             state["voice_summary"] = voice_summary
 
-        state["response"] = await _localized(
-            f"✅ *आवेदन सफलतापूर्वक जमा!*\n\n🔢 संदर्भ: *{ref}*\n📱 SMS पर पुष्टि मिलेगी।\n\n📄 PDF रसीद तैयार है।",
-            f"✅ *Application Submitted!*\n\n🔢 Reference: *{ref}*\n📱 Confirmation SMS sent.\n\n📄 PDF receipt ready.",
-            lang,
+        state["response"] = await _llm_respond(
+            f"Tell user their {form_type.replace('_', ' ').title()} application is submitted successfully. "
+            f"Reference: {ref}. PDF receipt is ready. SMS confirmation will follow.",
+            {"form_type": form_type, "reference": ref, "fields_count": len(form_data)},
+            lang, user_id,
         )
         state["status"] = GraphStatus.COMPLETED.value
         state["receipt_ready"] = True
@@ -1226,33 +1211,41 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
 
     state["portal_url"] = portal_url
 
-    # Execute navigate + fill via MCP
+    # Execute navigate + fill via MCP with adaptive retry
     fill_result = await router.execute("browser", "navigate_and_fill",
         session_id=session_id,
         portal_url=portal_url,
         form_data=form_data,
         form_type=form_type,
-    )
-
-    await _broadcast_progress(
-        session_id, "Form Filled — Waiting for OTP", 0.85,
-        [{"id": 1, "label": "Verify Identity", "done": True},
-         {"id": 2, "label": "Understand Request", "done": True},
-         {"id": 3, "label": "Collect Information", "done": True},
-         {"id": 4, "label": "Validate Data", "done": True},
-         {"id": 5, "label": "Fill Portal", "done": True},
-         {"id": 6, "label": "Submit & Receipt", "done": False, "active": True}],
-        user_id,
-    )
+        )
 
     fields_filled = fill_result.get("fields_filled", 0)
     otp_detected = fill_result.get("otp_detected", False)
 
+    # Adaptive retry: if first attempt fails, try alternative approach
+    if fill_result.get("error") and not fill_result.get("fields_filled"):
+        print(f"[FillForm] First attempt failed: {fill_result['error']}. Trying alternative...")
+        # Try filling field-by-field instead of all-at-once
+        for field, value in form_data.items():
+            if isinstance(value, dict) or not value:
+                continue
+            try:
+                await router.execute("browser", "fill_field",
+                    session_id=session_id, field_label=field.replace("_", " ").title(), value=str(value))
+            except Exception:
+                pass
+        # Re-run the full form fill
+        fill_result = await router.execute("browser", "fill_form",
+            session_id=session_id,
+            form_data=form_data,
+            form_type=form_type,
+        )
+
     if fill_result.get("error"):
-        state["response"] = await _localized(
-            f"⚠️ फ़ॉर्म भरने में समस्या। फिर से कोशिश करें।\nत्रुटि: {fill_result['error']}",
-            f"⚠️ Form fill issue. Please try again.\nError: {fill_result['error']}",
-            lang,
+        state["response"] = await _llm_respond(
+            "Tell user there was a technical issue filling the form. Apologize sincerely, explain briefly what went wrong, and ask them to try again.",
+            {"error": fill_result.get("error", ""), "form_type": form_type},
+            lang, user_id,
         )
         state["status"] = GraphStatus.ERROR.value
     elif otp_detected:

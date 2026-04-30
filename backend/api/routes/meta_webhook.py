@@ -224,30 +224,36 @@ async def process_and_reply(phone: str, text: str, msg_type: str = "text", image
         from lib.language_utils import detect_language
 
         lang = detect_language(text) or "hi" if text else "hi"
-
-        # Get or create session
         session = _session_store.get(phone, {})
         session_id = session.get("session_id", "")
 
+        # Send "thinking" indicator immediately for long operations
+        thinking_sent = False
+        if len(text) > 20 and "card" not in text.lower()[:30]:
+            try:
+                await send_meta_message(phone, "✍️ *Thinking...*")
+                thinking_sent = True
+            except Exception:
+                pass
+
         # Run through agent
         result = await agent_process(
-            user_id=phone,
-            user_phone=phone,
+            user_id=phone, user_phone=phone,
             message=image_b64 if msg_type == "image" and image_b64 else text,
-            message_type=msg_type,
-            language=lang,
-            session_id=session_id,
+            message_type=msg_type, language=lang, session_id=session_id,
         )
 
-        # Save session
         _session_store[phone] = {
             "session_id": result.get("session_id", ""),
             "language": lang,
         }
 
-        # Send response
+        # Send response (thinking indicator was already sent, this replaces it)
         response_text = result.get("response", "")
-        if response_text:
+        if response_text and not thinking_sent:
+            await send_meta_message(phone, response_text[:4000])
+        elif response_text:
+            # Had thinking sent — send real response
             await send_meta_message(phone, response_text[:4000])
 
         # If voice mode, also send voice reply
