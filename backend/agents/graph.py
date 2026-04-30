@@ -495,53 +495,49 @@ async def security_enroll_node(state: GramSetuState) -> GramSetuState:
         return state
 
     # Step 2: Selfie enrollment
-    if not state.get("form_data", {}).get("_selfie_b64"):
-        # Check if this is an image message
-        if message_type == "image" and text:
-            from backend.secure_enclave import store_selfie_hash
-            ok = store_selfie_hash(user_id, text)
-            if ok:
-                state["response"] = await _localized(
-                    "✅ *सेल्फ़ी सुरक्षित!*\n\n"
-                    "आपकी सुरक्षा सेटअप पूरी हो गई।\n\n"
-                    "अब से हर फ़ॉर्म भरने से पहले आपका PIN और सेल्फ़ी पूछा जाएगा।\n\n"
-                    "👉 बताइए — आपको कौन सा फ़ॉर्म भरना है?",
-                    "✅ *Selfie secured!*\n\n"
-                    "Your security setup is complete.\n\n"
-                    "From now on, your PIN and selfie will be required before filling forms.\n\n"
-                    "👉 What form do you need?",
-                    lang,
-                )
-                state["next_node"] = "detect_intent"
-                state["status"] = GraphStatus.ACTIVE.value
-            else:
-                state["response"] = await _localized(
-                    "❌ फ़ोटो बहुत छोटी या अमान्य है। कृपया एक साफ़ सेल्फ़ी भेजें।",
-                    "❌ Photo too small or invalid. Please send a clear selfie.",
-                    lang,
-                )
-                state["status"] = GraphStatus.WAIT_USER.value
-                state["next_node"] = "security_enroll"
+    # Accept image via message_type="image" or special commands
+    is_image = message_type == "image"
+    is_selfie_cmd = text.lower() in ("selfie", "selft", "photo", "face", "send selfie")
+
+    if is_image and text and len(text) > 500:  # base64 encoded image
+        from backend.secure_enclave import store_selfie_hash
+        ok = store_selfie_hash(user_id, text)
+        if ok:
+            state["response"] = await _localized(
+                "✅ *सेल्फ़ी सुरक्षित!*\n\n"
+                "आपकी सुरक्षा सेटअप पूरी हो गई।\n\n"
+                "अब से हर फ़ॉर्म भरने से पहले आपका PIN और सेल्फ़ी पूछा जाएगा।\n\n"
+                "👉 बताइए — आपको कौन सा फ़ॉर्म भरना है?",
+                "✅ *Selfie secured!*\n\n"
+                "Your security setup is complete.\n\n"
+                "From now on, your PIN and selfie will be required before filling forms.\n\n"
+                "👉 What form do you need?",
+                lang,
+            )
+            state["next_node"] = "detect_intent"
+            state["status"] = GraphStatus.ACTIVE.value
         else:
             state["response"] = await _localized(
-                "📸 *सुरक्षा सेटअप — चरण 2/2*\n\n"
-                "कृपया अपनी एक *सेल्फ़ी* (चेहरे की फ़ोटो) भेजें।\n\n"
-                "यह आख़िरी सुरक्षा परत है — हर फ़ॉर्म से पहले आपकी सेल्फ़ी से मिलान होगा।\n\n"
-                "_फ़ोटो एन्क्रिप्टेड है और केवल चेहरे की पुष्टि के लिए उपयोग होगी।_",
-                "📸 *Security Setup — Step 2/2*\n\n"
-                "Please send a *selfie* (face photo).\n\n"
-                "This is your final security layer — every form requires a fresh selfie match.\n\n"
-                "_Photo is encrypted and used only for face verification._",
+                "❌ फ़ोटो बहुत छोटी या अमान्य है। कृपया एक साफ़ सेल्फ़ी भेजें।",
+                "❌ Photo too small or invalid. Please send a clear selfie.",
                 lang,
             )
             state["status"] = GraphStatus.WAIT_USER.value
             state["next_node"] = "security_enroll"
-        state["current_node"] = "security_enroll"
-        return state
-
-    state["next_node"] = "security_enroll"
-    state["current_node"] = "security_enroll"
-    return state
+    else:
+        state["response"] = await _localized(
+            "📸 *सुरक्षा सेटअप — चरण 2/2*\n\n"
+            "कृपया व्हाट्सएप पर अपनी एक *क्लियर सेल्फ़ी* (चेहरे की फ़ोटो) भेजें।\n\n"
+            "यह आख़िरी सुरक्षा परत है — हर फ़ॉर्म से पहले आपकी सेल्फ़ी से मिलान होगा।\n\n"
+            "_फ़ोटो एन्क्रिप्टेड है और केवल चेहरे की पुष्टि के लिए उपयोग होगी।_",
+            "📸 *Security Setup — Step 2/2*\n\n"
+            "Please send a *clear selfie* (face photo) on WhatsApp.\n\n"
+            "This is your final security layer — every form requires a fresh selfie match.\n\n"
+            "_Photo is encrypted and used only for face verification._",
+            lang,
+        )
+        state["status"] = GraphStatus.WAIT_USER.value
+        state["next_node"] = "security_enroll"
 
 
 # ════════════════════════════════════════════════════════════

@@ -16,6 +16,7 @@ Meta sends:
 """
 import os
 import json
+import base64
 import httpx
 import asyncio
 from fastapi import APIRouter, Request, HTTPException
@@ -80,8 +81,19 @@ async def receive_message(request: Request):
 
             for msg in messages:
                 sender_phone = msg.get("from", "")
+                msg_type = msg.get("type", "text")
                 text = extract_text(msg)
-                if text and sender_phone:
+                
+                # Handle images: download from Meta, convert to base64
+                if msg_type == "image" and msg.get("image", {}).get("id"):
+                    image_id = msg["image"]["id"]
+                    image_b64 = await download_meta_image(image_id)
+                    caption = msg.get("image", {}).get("caption", "") or "[Selfie]"
+                    if image_b64:
+                        tasks.append(process_and_reply(sender_phone, caption, "image", image_b64))
+                    else:
+                        tasks.append(process_and_reply(sender_phone, caption or "📸 Photo received"))
+                elif text and sender_phone:
                     tasks.append(process_and_reply(sender_phone, text))
 
     if tasks:
@@ -121,13 +133,13 @@ async def send_whatsapp_message(request: Request):
 _session_store: dict[str, dict] = {}  # phone → session_id
 
 
-async def process_and_reply(phone: str, text: str):
+async def process_and_reply(phone: str, text: str, msg_type: str = "text", image_b64: str = ""):
     """Process a WhatsApp message through GramSetu and reply via Meta."""
     try:
         from backend.agents.graph import process_message as agent_process
         from lib.language_utils import detect_language
 
-        lang = detect_language(text) or "hi"
+        lang = detect_language(text) or "hi" if text else "hi"
 
         # Get or create session
         session = _session_store.get(phone, {})
@@ -137,8 +149,8 @@ async def process_and_reply(phone: str, text: str):
         result = await agent_process(
             user_id=phone,
             user_phone=phone,
-            message=text,
-            message_type="text",
+            message=image_b64 if msg_type == "image" and image_b64 else text,
+            message_type=msg_type,
             language=lang,
             session_id=session_id,
         )
@@ -257,11 +269,10 @@ def extract_text(msg: dict) -> str:
         return msg.get("text", {}).get("body", "")
 
     if msg_type == "audio":
-        return "[Voice note received — send text for now]"
+        return "[Voice note — send text for now]"
 
     if msg_type == "image":
-        caption = msg.get("image", {}).get("caption", "")
-        return caption or "[Image received]"
+        return msg.get("image", {}).get("caption", "") or "[Photo]"
 
     if msg_type == "interactive":
         interactive = msg.get("interactive", {})
@@ -271,3 +282,35 @@ def extract_text(msg: dict) -> str:
             return interactive["list_reply"].get("id", "")
 
     return ""
+
+
+async def download_meta_image(image_id: str) -> str:
+    """Download an image from Meta's media API and return as base64."""
+    if not META_ACCESS_TOKEN:
+        return ""
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            # Step 1: Get image URL from Meta
+            url_resp = await client.get(
+                f"https://graph.facebook.com/{META_API_VERSION}/{image_id}",
+                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
+            )
+            if url_resp.status_code != 200:
+                return ""
+            image_url = url_resp.json().get("url", "")
+            if not image_url:
+                return ""
+
+            # Step 2: Download image bytes
+            dl_resp = await client.get(
+                image_url,
+                headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
+            )
+            if dl_resp.status_code != 200:
+                return ""
+
+            # Step 3: Return base64
+            return base64.b64encode(dl_resp.content).decode()
+    except Exception as e:
+        print(f"[Meta] Image download failed: {e}")
+        return ""
