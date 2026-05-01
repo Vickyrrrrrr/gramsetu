@@ -490,11 +490,29 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
         if collect_attempts >= 3:
             state["response"] = await _llm_respond("Proceeding with available data. Some fields couldn't be collected.", {"collected": list(existing_data.keys())[:5]}, lang, state.get("user_id", ""))
             state["next_node"] = "validate_confirm"; state["status"] = GraphStatus.ACTIVE.value; state["current_node"] = "collect_data"; return state
-    if missing:
+    if missing and is_govt_form:
+        # Show what was auto-filled AND what's still needed
+        filled_fields = [f.replace("_", " ").title() for f in required if f in existing_data and existing_data[f]]
+        missing_labels = [f.replace("_", " ").title() for f in missing[:6]]; state["missing_fields"] = missing
+        state["response"] = await _llm_respond(
+            f"Tell user what was auto-filled from their data and what's still needed. "
+            f"Auto-filled: {', '.join(filled_fields[:5])}. Still needed: {', '.join(missing_labels[:4])}.",
+            {"collected": filled_fields[:5], "missing": missing_labels[:4]}, lang, state.get("user_id", "")
+        )
+        state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "collect_data"
+    elif missing and not is_govt_form:
         missing_labels = [f.replace("_", " ").title() for f in missing[:6]]; state["missing_fields"] = missing
         state["response"] = await _llm_respond(f"Tell user what information is still needed: {', '.join(missing_labels[:4])}. Be helpful and specific.", {"missing_fields": missing_labels[:4], "collected_so_far": list(existing_data.keys())[:5]}, lang, state.get("user_id", ""))
         state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "collect_data"
-    else: state["next_node"] = "validate_confirm"; state["status"] = GraphStatus.ACTIVE.value; state["challenge_otp_attempts"] = 0
+    else:
+        if is_govt_form and state.get("_dl_fetched"):
+            # All fields came from DigiLocker — show summary, go to confirm
+            filled_count = len([f for f in required if f in existing_data and existing_data[f]])
+            state["response"] = await _llm_respond(
+                f"Tell user all {filled_count} fields were auto-filled from their DigiLocker data. Show a brief summary and ask if it's correct.",
+                {"auto_filled": True, "fields_count": filled_count}, lang, state.get("user_id", "")
+            )
+        state["next_node"] = "validate_confirm"; state["status"] = GraphStatus.ACTIVE.value; state["challenge_otp_attempts"] = 0
     state["current_node"] = "collect_data"
     state.setdefault("audit_entries", []).append({"agent": "data_collector", "node": "collect_data", "action": "extract_fields", "output": f"{len(existing_data)} fields, {len(missing)} missing", "latency_ms": round((time.time() - start) * 1000, 1)})
     return state
