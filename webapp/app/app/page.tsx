@@ -56,9 +56,9 @@ function ProgressRow({ step, pct }: { step: string; pct: number }) {
 
 function Bubble({ text }: { text: string }) {
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-0.5" suppressHydrationWarning>
       {text.split('\n').map((line, i) => (
-        <p key={i} dangerouslySetInnerHTML={{
+        <p key={i} suppressHydrationWarning dangerouslySetInnerHTML={{
           __html: line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>') || '&nbsp;'
         }} />
       ))}
@@ -304,9 +304,12 @@ export default function AppPage() {
     f(); return () => { c = true }
   }, [mcpOpen])
 
-  /* ── WebSocket ─────────────────────── */
+  /* ── WebSocket (browser preview — works on HTTP only) ── */
   useEffect(() => {
-    const p = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const isHttps = window.location.protocol === 'https:'
+    if (isHttps) return  // No WebSocket on HTTPS (VPS doesn't have SSL)
+
+    const p = 'ws'
     let ws: WebSocket | null = null; let rt: ReturnType<typeof setTimeout> | null = null; let a = true
     const conn = () => {
       if (!a) return
@@ -366,7 +369,7 @@ export default function AppPage() {
     if (!isOnline) { setErrorBanner('No internet connection'); return }
     setStatus('loading'); setLastFailedMsg(null)
     try {
-      const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, user_id: userId, phone: phoneOverride || phone || 'anonymous', language: lang }) })
+      const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, user_id: userId, phone: phoneOverride || phone || '', language: lang }) })
       if (!r.ok) throw new Error(`${r.status}`)
       const d = await r.json()
       if (d.language && LANG_MAP[d.language]) setLang(d.language)
@@ -431,7 +434,7 @@ export default function AppPage() {
       const r = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: base64, user_id: userId, phone: phone || 'anonymous', language: lang, message_type: 'image' }),
+        body: JSON.stringify({ message: base64, user_id: userId, phone: phone || '', language: lang, message_type: 'image' }),
       })
       if (!r.ok) throw new Error('')
       const d = await r.json()
