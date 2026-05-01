@@ -7,12 +7,15 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
-      - NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-      - SARVAM_API_KEY=${SARVAM_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - SARVAM_API_KEY=${SARVAM_API_KEY}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - META_ACCESS_TOKEN=${META_ACCESS_TOKEN}
+      - META_PHONE_NUMBER_ID=${META_PHONE_NUMBER_ID}
+      - META_VERIFY_TOKEN=${META_VERIFY_TOKEN}
       - PORT=8000
-      - WHATSAPP_GATEWAY_URL=http://whatsapp-gateway:3001
     volumes:
       - ./data:/app/data
     restart: unless-stopped
@@ -21,22 +24,15 @@ services:
       interval: 30s
       retries: 3
 
-  whatsapp-gateway:
+  webapp:
     build:
-      context: ./whatsapp-gateway
+      context: ./webapp
       dockerfile: Dockerfile
-    container_name: gramsetu-whatsapp
+    container_name: gramsetu-webapp
     ports:
-      - "3001:3001"
+      - "3000:3000"
     environment:
-      - GRAMSETU_URL=http://backend:8000
-      - LOG_LEVEL=info
-    volumes:
-      - ./whatsapp-gateway/auth_info:/app/auth_info
+      - NEXT_PUBLIC_API_URL=http://144.24.106.68:8000
     depends_on:
       - backend
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) })"]
-      interval: 60s
-      retries: 3

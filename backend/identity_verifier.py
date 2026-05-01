@@ -42,8 +42,14 @@ def hash_identity(aadhaar: str, phone: str = "") -> str:
 
 def check_duplicate_identity(user_id: str, aadhaar: str, phone: str = "") -> tuple[bool, str]:
     """Check if identity hash already exists for another user."""
-    # In production: check across all users in persistent state
-    # For MVP: return not duplicate (will add real check with persistent DB)
+    from backend.persistent_state import check_identity_hash_exists
+    
+    id_hash = hash_identity(aadhaar, phone)
+    is_duplicate = check_identity_hash_exists(id_hash, user_id)
+    
+    if is_duplicate:
+        return True, "This Aadhaar is already registered with another account."
+        
     return False, ""
 
 

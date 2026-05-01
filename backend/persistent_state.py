@@ -1,108 +1,110 @@
 """
 ============================================================
-persistent_state.py — SQLite-Backed State Store
+persistent_state.py — Supabase-Backed State Store
 ============================================================
 Replaces ALL in-memory dicts across GramSetu with persistent
-storage that survives container restarts.
+storage in Supabase (Postgres) that survives container restarts.
 
-All state is keyed by `namespace:key` → serialized JSON value.
-Thread-safe, async-compatible, auto-creates tables.
+All state is keyed by `namespace` and `key` → serialized JSON value.
+Thread-safe, async-compatible, multi-server safe.
 
 Survives restart: ✅  
-Concurrent access: ✅ (WAL mode + connection per request)
+Concurrent access: ✅ (Handled by Postgres)
 Multi-user safe: ✅ (keyed by user_id)
 """
 import os
 import json
 import time
-import sqlite3
-import threading
 from typing import Optional
 
-# ── Database path ──────────────────────────────────────────
-_STATE_DB = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "state.db"
-)
-os.makedirs(os.path.dirname(_STATE_DB), exist_ok=True)
+from backend.database import get_connection
 
-# Thread-local connections for concurrent access
-_local = threading.local()
-
-# WAL mode for concurrent reads
-def _get_conn() -> sqlite3.Connection:
-    if not hasattr(_local, "conn") or _local.conn is None:
-        _local.conn = sqlite3.connect(_STATE_DB, check_same_thread=False)
-        _local.conn.execute("PRAGMA journal_mode=WAL")
-        _local.conn.execute("PRAGMA synchronous=NORMAL")
-        _local.conn.execute("CREATE TABLE IF NOT EXISTS kv (namespace TEXT, key TEXT, value TEXT, expires_at REAL, PRIMARY KEY (namespace, key))")
-        _local.conn.execute("CREATE INDEX IF NOT EXISTS idx_expires ON kv(expires_at)")
-        _local.conn.commit()
-    return _local.conn
-
+def _get_client():
+    from backend.database import get_connection, _check_supabase
+    _check_supabase()
+    return get_connection()
 
 def set_state(namespace: str, key: str, value: dict, ttl_seconds: Optional[int] = None) -> bool:
     """Store a value. Optionally auto-expire after ttl_seconds."""
     try:
-        conn = _get_conn()
+        client = _get_client()
         expires = (time.time() + ttl_seconds) if ttl_seconds else None
-        conn.execute(
-            "INSERT OR REPLACE INTO kv VALUES (?, ?, ?, ?)",
-            (namespace, key, json.dumps(value), expires)
-        )
-        conn.commit()
+        
+        # Supabase upsert requires primary keys to match
+        client.table("kv_store").upsert({
+            "namespace": namespace,
+            "key": key,
+            "value": value,
+            "expires_at": expires
+        }).execute()
         return True
     except Exception as e:
         print(f"[State] set_state error: {e}")
         return False
 
-
 def get_state(namespace: str, key: str) -> Optional[dict]:
     """Retrieve a stored value. Returns None if not found or expired."""
     try:
-        conn = _get_conn()
-        row = conn.execute(
-            "SELECT value, expires_at FROM kv WHERE namespace = ? AND key = ?",
-            (namespace, key)
-        ).fetchone()
-        if not row:
+        client = _get_client()
+        res = client.table("kv_store").select("value, expires_at").eq("namespace", namespace).eq("key", key).execute()
+        
+        if not res.data:
             return None
-        value_json, expires_at = row
+            
+        row = res.data[0]
+        expires_at = row.get("expires_at")
+        
         if expires_at and time.time() > expires_at:
             # Expired — delete and return None
-            conn.execute("DELETE FROM kv WHERE namespace = ? AND key = ?", (namespace, key))
-            conn.commit()
+            client.table("kv_store").delete().eq("namespace", namespace).eq("key", key).execute()
             return None
-        return json.loads(value_json)
+            
+        return row.get("value")
     except Exception as e:
         print(f"[State] get_state error: {e}")
         return None
 
+def get_all_state(namespace: str) -> list[tuple[str, dict]]:
+    """Retrieve all valid key-value pairs for a given namespace. Returns list of (key, value)."""
+    try:
+        client = _get_client()
+        # Only fetch items where expires_at is null or greater than now
+        res = client.table("kv_store").select("key, value, expires_at").eq("namespace", namespace).execute()
+        
+        valid_items = []
+        for row in res.data:
+            expires_at = row.get("expires_at")
+            key = row.get("key")
+            
+            if expires_at and time.time() > expires_at:
+                client.table("kv_store").delete().eq("namespace", namespace).eq("key", key).execute()
+            else:
+                valid_items.append((key, row.get("value")))
+                
+        return valid_items
+    except Exception as e:
+        print(f"[State] get_all_state error: {e}")
+        return []
 
 def delete_state(namespace: str, key: str) -> bool:
     """Delete a stored value."""
     try:
-        conn = _get_conn()
-        conn.execute("DELETE FROM kv WHERE namespace = ? AND key = ?", (namespace, key))
-        conn.commit()
+        client = _get_client()
+        client.table("kv_store").delete().eq("namespace", namespace).eq("key", key).execute()
         return True
-    except Exception:
+    except Exception as e:
+        print(f"[State] delete_state error: {e}")
         return False
-
 
 def increment_counter(namespace: str, key: str, ttl_seconds: int = 60) -> int:
     """
-    Thread-safe counter increment. Returns new count.
+    Counter increment. Returns new count.
     Used for rate limiting.
     """
     try:
-        conn = _get_conn()
-        row = conn.execute(
-            "SELECT value FROM kv WHERE namespace = ? AND key = ? AND (expires_at > ? OR expires_at IS NULL)",
-            (namespace, key, time.time())
-        ).fetchone()
-        current = json.loads(row[0]).get("count", 0) if row else 0
-        new_count = current + 1
+        current = get_state(namespace, key)
+        count = current.get("count", 0) if current else 0
+        new_count = count + 1
         set_state(namespace, key, {"count": new_count}, ttl_seconds)
         return new_count
     except Exception:
@@ -145,6 +147,20 @@ def get_identity_hash(user_id: str) -> Optional[str]:
     data = get_state("identity_hash", user_id)
     return data.get("hash") if data else None
 
+def check_identity_hash_exists(id_hash: str, exclude_user_id: str) -> bool:
+    """Check if the given identity hash exists for any user OTHER than exclude_user_id."""
+    try:
+        client = _get_client()
+        # In Supabase, value is typically JSONB
+        # This checks if the value JSON object has {"hash": id_hash} 
+        res = client.table("kv_store").select("key").eq("namespace", "identity_hash") \
+            .neq("key", exclude_user_id) \
+            .contains("value", {"hash": id_hash}).execute()
+        return len(res.data) > 0
+    except Exception as e:
+        print(f"[State] check_identity_hash_exists error: {e}")
+        return False
+
 def store_challenge(user_id: str, challenge: dict) -> bool:
     return set_state("challenge", user_id, challenge)
 
@@ -185,10 +201,11 @@ def rate_check(namespace: str, user_id: str, max_calls: int, window_seconds: int
 
 def cleanup_expired() -> int:
     """Remove all expired entries. Returns count removed."""
-    try:
-        conn = _get_conn()
-        cursor = conn.execute("DELETE FROM kv WHERE expires_at IS NOT NULL AND expires_at < ?", (time.time(),))
-        conn.commit()
-        return cursor.rowcount
+    try:lient = _get_client()
+        # Delete where expires_at is not null and less than current time
+        res = client.table("kv_store").delete().not_.is_("expires_at", "null").lt("expires_at", time.time()).execute()
+        return len(res.data) if res.data else 0
+    except Exception as e:
+        print(f"[State] cleanup_expired error: {e}").rowcount
     except Exception:
         return 0

@@ -53,26 +53,16 @@ async def queue_dead_letter(phone: str, msg_type: str, payload: str):
 
 async def process_dead_letters():
     """Retry all pending dead-letter messages."""
-    import sqlite3
+    from backend.persistent_state import get_all_state
 
     try:
-        conn = sqlite3.connect(os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-            "data", "state.db"
-        ))
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT namespace, key, value FROM kv WHERE namespace = ? AND (expires_at IS NULL OR expires_at > ?)",
-            (_DEAD_LETTER_NAMESPACE, time.time())
-        ).fetchall()
-        conn.close()
+        valid_items = get_all_state(_DEAD_LETTER_NAMESPACE)
 
         recovered = 0
-        for row in rows:
+        for key, data in valid_items:
             try:
-                data = json.loads(row[2])
                 if data.get("retries", 0) >= _MAX_RETRIES:
-                    _persist_del(_DEAD_LETTER_NAMESPACE, row[1])
+                    _persist_del(_DEAD_LETTER_NAMESPACE, key)
                     continue
 
                 phone = data.get("phone", "")
@@ -86,13 +76,13 @@ async def process_dead_letters():
                 else:
                     await process_and_reply(phone, payload)
 
-                _persist_del(_DEAD_LETTER_NAMESPACE, row[1])
+                _persist_del(_DEAD_LETTER_NAMESPACE, key)
                 recovered += 1
                 print(f"[DLQ] Recovered message for {phone}")
             except Exception as e:
                 print(f"[DLQ] Retry failed: {e}")
                 data["retries"] = data.get("retries", 0) + 1
-                _persist_set(_DEAD_LETTER_NAMESPACE, row[1], data)
+                _persist_set(_DEAD_LETTER_NAMESPACE, key, data)
 
         if recovered:
             print(f"[DLQ] Recovered {recovered} dead-letter messages")

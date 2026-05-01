@@ -79,27 +79,39 @@ function VaultPanel({ onClose, userId, onUseData }: {
   const [newLabel, setNewLabel] = useState('')
   const [newVal, setNewVal] = useState('')
 
-  const load = () => {
+  const load = async () => {
     try {
-      const raw = localStorage.getItem(`gv_${userId}`)
-      if (raw) setItems(JSON.parse(raw))
-      else setItems([])
+      const res = await fetch(`/api/vault/${userId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setItems(data.items || [])
+      }
       setUnlocked(true)
     } catch { setItems([]); setUnlocked(true) }
   }
 
-  const save = () => {
+  const saveDataToBackend = async (newItems: typeof items) => {
+    try {
+      await fetch(`/api/vault/${userId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: newItems })
+      })
+    } catch (e) { console.error('Vault save error', e) }
+  }
+
+  const save = async () => {
     if (!newLabel || !newVal) return
     const u = [...items, { id: uid(), label: newLabel, value: newVal }]
     setItems(u)
-    localStorage.setItem(`gv_${userId}`, JSON.stringify(u))
+    await saveDataToBackend(u)
     setNewLabel(''); setNewVal('')
   }
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     const u = items.filter(i => i.id !== id)
     setItems(u)
-    localStorage.setItem(`gv_${userId}`, JSON.stringify(u))
+    await saveDataToBackend(u)
   }
 
   const useAll = () => {
