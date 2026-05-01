@@ -48,7 +48,8 @@ def check_duplicate_identity(user_id: str, aadhaar: str, phone: str = "") -> tup
     is_duplicate = check_identity_hash_exists(id_hash, user_id)
     
     if is_duplicate:
-        return True, "This Aadhaar is already registered with another account."
+        # Don't block — this is likely the same person on a new device/session
+        return False, "This Aadhaar is already registered. Your data will be restored."
         
     return False, ""
 
