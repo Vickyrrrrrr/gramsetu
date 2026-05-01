@@ -193,3 +193,13 @@ def get_audit_log(limit: int = 50) -> str:
     """Retrieve the most recent audit log entries (PII-redacted)."""
     entries = _audit_log[-limit:]  # noqa: F821
     return json.dumps(entries, indent=2, ensure_ascii=False)
+
+
+@mcp.tool()
+async def verify_identity(user_id: str, aadhaar: str, face_photo: str = "", phone: str = "") -> dict:
+    """
+    Multi-factor identity verification. Returns {verified: bool, checks_passed: [...],
+    checks_failed: [...], risk_score: 0.0-1.0, message: str}.
+    """
+    from backend.identity_verifier import verify_identity as _verify
+    return await _verify(user_id, aadhaar, face_photo, phone)
