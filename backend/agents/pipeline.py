@@ -325,7 +325,12 @@ async def transcribe_node(state: GramSetuState) -> GramSetuState:
     else: state["transcribed_text"] = state.get("raw_message", "")
     state["current_node"] = "transcribe"
     if state.get("challenge_otp"): state["next_node"] = "phone_challenge"
-    elif state.get("message_type") == "image" and state.get("identity_verified"): state["next_node"] = "document_scan"
+    elif state.get("message_type") == "image" and state.get("identity_verified"):
+        from backend.secure_enclave import has_security_enrolled
+        if not has_security_enrolled(state.get("user_id", "")):
+            state["next_node"] = "security_enroll"
+        else:
+            state["next_node"] = "document_scan"
     elif state.get("message_type") == "voice" and state.get("identity_verified"): state["next_node"] = "voice_mode"
     elif state.get("identity_verified") and state.get("form_type"): state["next_node"] = "detect_intent"
     elif state.get("identity_verified"):
