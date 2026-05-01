@@ -42,19 +42,18 @@ def _get_form_template(form_type: str) -> list[str]:
 async def infer_form_fields(form_type: str, lang: str = "hi") -> list[str]:
     """
     Use LLM to dynamically determine what fields a form needs.
-    Works for ANY form type — government or private.
+    Works for ANY form type — government, private, startup, academic.
     """
     try:
         from backend.llm_client import chat_intent
         prompt = (
-            "You are an expert on Indian government forms. "
             f"List ALL the fields required for a '{form_type}' application. "
             "Return ONLY a JSON array of field names using snake_case. "
             "Include personal details, address, bank details, and any form-specific fields. "
             "Example: ['applicant_name', 'aadhaar_number', 'date_of_birth', 'gender', 'mobile_number', 'address']"
         )
         messages = [
-            {"role": "system", "content": "You are a form schema expert. Return ONLY valid JSON arrays."},
+            {"role": "system", "content": "You are a form schema expert. Return ONLY valid JSON arrays. Consider ALL form types — government, private, academic, startup, visa, application."},
             {"role": "user", "content": prompt},
         ]
         raw = await chat_intent(messages, temperature=0.1, max_tokens=512)

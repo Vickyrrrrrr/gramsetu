@@ -240,3 +240,52 @@ def _fallback_extract(form_type: str, user_text: str) -> dict:
         "confidence_scores": conf,
         "missing_fields": missing,
     }
+
+
+# ── Government form document map ──────────────────────────
+_FORM_DOC_MAP = {
+    "ration_card": ["aadhaar_card", "income_certificate", "address_proof"],
+    "pension": ["aadhaar_card", "age_proof", "bank_passbook", "income_certificate"],
+    "pan_card": ["aadhaar_card", "photo", "signature"],
+    "voter_id": ["aadhaar_card", "address_proof", "photo"],
+    "ayushman_bharat": ["aadhaar_card", "income_certificate", "address_proof", "bank_details"],
+    "mnrega": ["aadhaar_card", "address_proof", "bank_details", "photo"],
+    "pm_kisan": ["aadhaar_card", "land_record", "bank_details"],
+    "caste_certificate": ["aadhaar_card", "address_proof"],
+    "birth_certificate": ["parent_aadhaar", "hospital_discharge"],
+    "kisan_credit_card": ["aadhaar_card", "land_record", "bank_details", "photo"],
+    "jan_dhan": ["aadhaar_card", "photo", "address_proof"],
+}
+
+
+@mcp.tool()
+def fetch_documents_for_form(form_type: str, user_id: str) -> dict:
+    """
+    Auto-fetch user data AND document availability for a known government form.
+    Used by the pipeline to auto-fill known forms from stored user data.
+
+    Returns: {extracted_data: {field: value}, available_documents: [doc_names], missing_documents: [doc_names]}
+    """
+    data = _USER_DATA_STORE.get(user_id, {})
+    required_docs = _FORM_DOC_MAP.get(form_type, [])
+
+    available = []
+    missing = []
+    for doc in required_docs:
+        key = f"doc_{doc}"
+        if key in data or doc.replace("_", "") in "".join(data.keys()).lower():
+            available.append(doc)
+        else:
+            missing.append(doc)
+
+    return {
+        "found": bool(data),
+        "extracted_data": data if data else {},
+        "required_documents": required_docs,
+        "available_documents": available,
+        "missing_documents": missing,
+        "message": (
+            f"{len(available)}/{len(required_docs)} documents available in DigiLocker. "
+            f"Missing: {', '.join(missing) if missing else 'none'}"
+        ) if data else "No user data registered.",
+    }

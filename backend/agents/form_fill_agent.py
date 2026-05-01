@@ -78,9 +78,22 @@ class FormFillAction:
     done: bool = False
     otp_detected: bool = False
     otp_field_position: Optional[dict] = None
+    login_detected: bool = False
+    login_type: str = ""
+    file_upload_detected: bool = False
+    file_upload_fields: list = field(default_factory=list)
     confidence: float = 0.0
     reasoning: str = ""
     error: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return {
+            "action": self.action, "field": self.field, "value": self.value,
+            "label": self.label, "page_phase": self.page_phase, "done": self.done,
+            "otp_detected": self.otp_detected, "login_detected": self.login_detected,
+            "login_type": self.login_type, "file_upload_detected": self.file_upload_detected,
+            "confidence": self.confidence, "reasoning": self.reasoning,
+        }
 
 
 @dataclass
@@ -89,6 +102,10 @@ class FormFillResult:
     success: bool = False
     fields_filled: int = 0
     otp_detected: bool = False
+    login_detected: bool = False
+    login_type: str = ""
+    file_upload_detected: bool = False
+    manual_uploads: list = field(default_factory=list)
     otp_field_position: Optional[dict] = None
     screenshot_b64: str = ""
     screenshot_path: str = ""
@@ -115,7 +132,7 @@ async def _analyze_with_nim_vision(
     remaining = {k: v for k, v in form_data.items() if v}
     remaining_items = "\n".join(f"  - {k}: {v}" for k, v in list(remaining.items())[:15])
 
-    prompt = f"""You are a government form-filling AI assistant. Look at the screenshot of an Indian government portal.
+    prompt = f"""You are a web form-filling AI assistant. Look at the screenshot of a web portal.
 
 **Form type:** {form_type}
 **Language:** {language}
@@ -125,31 +142,39 @@ async def _analyze_with_nim_vision(
 {remaining_items}
 
 **Instructions:**
-1. Look carefully at the screenshot for ANY blocking popups, overlays, or cookie consent banners (e.g., "Accept All Cookies", "Close", "OK", "आईये", "सहमति दें").
-2. **PRIORITY 1**: If a popup is blocking the form, set action="click_button" and label to the button text that closes it.
-3. **PRIORITY 2**: If no popup, identify which field from the list is visible on screen.
-4. Check if there is an OTP/verification field.
-5. Check if the submit button is visible.
+1. Look for blocking popups, overlays, cookie consent banners, or chat widgets. Close them first.
+2. Check if this is a LOGIN/SIGN-IN page first. If you see login buttons, auth fields, or OAuth options, report it.
+3. Check for FILE UPLOAD inputs — mark these, don't try to fill them.
+4. Identify which field from the list is visible on screen.
+5. Check if there's an OTP/verification field.
 
-Respond with ONLY a valid JSON object. DO NOT include any conversational text, explanations, or markdown blocks. The response must start with '{' and end with '}'.
+Respond with ONLY a valid JSON object. The response must start with '{{' and end with '}}'.
 
 {{
-  "action": "fill_field" | "click_button" | "select_option" | "scroll_down" | "wait_for_page" | "done",
+  "action": "fill_field" | "click_button" | "select_option" | "scroll_down" | "wait_for_page" | "login_detected" | "done",
   "field": "field_name",
   "value": "value to enter",
   "label": "exact label text visible on screen",
-  "page_phase": "personal" | "address" | "bank" | "review" | "otp" | "unknown",
+  "page_phase": "login" | "personal" | "address" | "bank" | "file_upload" | "review" | "otp" | "unknown",
   "done": false,
   "otp_detected": false,
-  "otp_field_position": {{"x": 0, "y": 0}},
+  "login_detected": false,
+  "login_type": "",
+  "file_upload_detected": false,
   "confidence": 0.95,
   "reasoning": "brief explanation"
 }}
 
-If a blocking popup is seen, prioritize clicking its close/accept button.
-If no more fields need filling and form appears complete, set action="done".
-If OTP field is visible, set otp_detected=true and otp_field_position to clickable center.
-If nothing visible to fill, try scroll_down."""
+If a LOGIN/SIGN-IN page is visible, set login_detected=true and login_type to one of:
+  - "otp" — if Aadhaar or mobile OTP fields visible
+  - "password" — if email/username + password fields visible
+  - "oauth" — if Google/Facebook/Apple sign-in buttons visible
+  - "unknown" — if login buttons visible but type unclear
+
+If file upload inputs are visible (choose file, browse, attach), set file_upload_detected=true.
+If no more fields need filling, set action="done".
+If OTP field is visible, set otp_detected=true.
+If nothing visible, try scroll_down."""
 
     try:
         async with httpx.AsyncClient(timeout=45.0) as client:
@@ -316,6 +341,10 @@ def _parse_action_response(raw: str) -> FormFillAction:
                     done=parsed.get("done", False),
                     otp_detected=parsed.get("otp_detected", False) or parsed.get("otp", False),
                     otp_field_position=parsed.get("otp_field_position"),
+                    login_detected=parsed.get("login_detected", False),
+                    login_type=parsed.get("login_type", ""),
+                    file_upload_detected=parsed.get("file_upload_detected", False),
+                    file_upload_fields=parsed.get("file_upload_fields", []),
                     confidence=parsed.get("confidence", 0.8),
                     reasoning=parsed.get("reasoning", ""),
                 )
@@ -650,6 +679,28 @@ async def _playwright_fill(
                 elif action.action == "wait_for_page":
                     await page.wait_for_timeout(1000)
 
+                elif action.login_detected:
+                    # VLM detected a login page — stop filling, report back
+                    result.login_detected = True
+                    result.login_type = action.login_type or "unknown"
+                    try:
+                        ss_bytes = await page.screenshot(type="jpeg", quality=70)
+                        result.screenshot_b64 = base64.b64encode(ss_bytes).decode()
+                    except Exception:
+                        pass
+                    break
+
+                elif action.file_upload_detected:
+                    # VLM detected file upload fields — mark and continue with other fields
+                    file_fields = action.file_upload_fields or [{"label": action.label or "Unknown file"}]
+                    result.file_upload_detected = True
+                    result.manual_uploads.extend(file_fields)
+                    filled_count += 1  # mark as handled (not filled, but acknowledged)
+                    # Remove from remaining so we don't try again
+                    if action.field in remaining_data:
+                        remaining_data.pop(action.field)
+                    # Continue loop — other fields can still be filled
+
                 # Stuck detection
                 if action.action == last_action:
                     stuck_count += 1
@@ -758,6 +809,10 @@ async def run_form_fill_agent(
         "fields_filled": result.fields_filled,
         "otp_detected": result.otp_detected,
         "otp_field_position": result.otp_field_position,
+        "login_detected": result.login_detected,
+        "login_type": result.login_type,
+        "file_upload_detected": result.file_upload_detected,
+        "manual_uploads": [u.get("label", str(u)) for u in result.manual_uploads],
         "screenshot_b64": result.screenshot_b64,
         "screenshot_path": result.screenshot_path,
         "reference_number": result.reference_number,

@@ -12,15 +12,13 @@ Survives restart: ✅
 Concurrent access: ✅ (Handled by Postgres)
 Multi-user safe: ✅ (keyed by user_id)
 """
-import os
-import json
 import time
 from typing import Optional
 
 from backend.database import get_connection
 
 def _get_client():
-    from backend.database import get_connection, _check_supabase
+    from backend.database import _check_supabase
     _check_supabase()
     return get_connection()
 

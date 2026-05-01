@@ -311,8 +311,8 @@ async def resolve_portal_url(form_type: str, lang: str = "hi") -> str:
     try:
         from backend.llm_client import chat_intent
         prompt = (
-            f"What is the exact URL of the official government or institutional portal "
-            f"where a '{form_type}' application can be filled in India? "
+            f"What is the exact URL of the official website "
+            f"where a '{form_type}' application form can be filled? "
             f"Return ONLY the full URL. If unsure, return the most likely URL. "
             f"Do NOT explain — just the URL."
         )

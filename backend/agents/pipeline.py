@@ -346,6 +346,24 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
     if not required:
         try: required = await infer_form_fields(form_type, lang); state["_inferred_fields"] = required
         except: required = _get_form_template(form_type)
+
+    # ── DigiLocker auto-fetch for known government forms ──
+    from backend.agents.portal_registry import is_known_form
+    if is_known_form(form_type) and not existing_data.get("_dl_fetched"):
+        try:
+            from backend.mcp_tool_router import get_router
+            rtr = get_router()
+            dl_result = await rtr.execute("digilocker", "fetch_documents_for_form",
+                form_type=form_type, user_id=state.get("user_id", ""))
+            if dl_result.get("found"):
+                dl_data = dl_result.get("extracted_data", {})
+                if dl_data:
+                    existing_data.update(dl_data)
+                    state["confidence_scores"].update({k: 0.95 for k in dl_data})
+                    collected_this_round = True
+                    state["_dl_fetched"] = True
+        except Exception:
+            pass
     if user_context:
         quick = _manual_extract(user_context, required); quick_data = quick.get("extracted_data", {})
         if quick_data: existing_data.update(quick_data); collected_this_round = True
@@ -470,18 +488,49 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
             except: pass
         fill_result = await router.execute("browser", "fill_form", session_id=session_id, form_data=form_data, form_type=form_type)
         fields_filled = fill_result.get("fields_filled", 0); otp_detected = fill_result.get("otp_detected", False)
+    login_detected = fill_result.get("login_detected", False)
+    login_type = fill_result.get("login_type", "")
+    file_uploads_detected = fill_result.get("file_upload_detected", False)
+    manual_uploads = fill_result.get("manual_uploads", [])
+
+    # ── Handle login page detection ──────────────────────
+    if login_detected:
+        if login_type == "otp":
+            state["response"] = await _llm_respond(
+                "Portal requires OTP login. Tell user we're handling Aadhaar OTP login and to share the OTP when received.",
+                {"login_type": "otp", "form_type": form_type}, lang, user_id
+            )
+            state["status"] = GraphStatus.WAIT_OTP.value; state["next_node"] = "fill_form"
+        elif login_type in ("oauth", "password", "unknown"):
+            portal_url = state.get("portal_url", "the portal")
+            state["response"] = await _llm_respond(
+                f"Portal at {portal_url} requires manual login ({login_type}). "
+                f"Tell user they need to log in themselves. For OAuth portals (Google/Facebook), "
+                f"explain that GramSetu's remote browser can be opened for them to authenticate. "
+                f"Ask user to reply 'open browser' to get the remote access link.",
+                {"login_type": login_type, "portal_url": portal_url}, lang, user_id
+            )
+            state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "fill_form"
+        state["current_node"] = "fill_form"
+        state.setdefault("audit_entries", []).append({"agent": "form_filler", "node": "fill_form", "action": "login_detected", "output": f"login_type={login_type}", "latency_ms": round((time.time() - start) * 1000, 1)})
+        return state
+
     if fill_result.get("error"):
-        state["response"] = await _llm_respond("Tell user there was a technical issue filling the form. Apologize and ask to try again.", {"error": fill_result.get("error", "")}, lang, user_id)
+        state["response"] = await _llm_respond("Tell user there was a technical issue filling the form. Apologize sincerely, explain briefly what went wrong, and ask them to try again.", {"error": fill_result.get("error", "")}, lang, user_id)
         state["status"] = GraphStatus.ERROR.value
     elif otp_detected:
         state["response"] = await _llm_respond(f"Tell user {fields_filled} fields have been filled. OTP is required. Ask them to send the 6-digit code.", {"fields_filled": fields_filled}, lang, user_id)
         state["status"] = GraphStatus.WAIT_OTP.value; state["next_node"] = "fill_form"
     else:
         state["status"] = GraphStatus.COMPLETED.value
-        state["response"] = await _llm_respond(f"Tell user the form has been filled. {fields_filled} fields completed.", {"fields_filled": fields_filled}, lang, user_id)
+        msg = f"Tell user the form has been filled. {fields_filled} fields completed."
+        if file_uploads_detected and manual_uploads:
+            upload_names = ", ".join(manual_uploads[:5])
+            msg += f" Also mention that {len(manual_uploads)} items require manual file upload: {upload_names}."
+        state["response"] = await _llm_respond(msg, {"fields_filled": fields_filled}, lang, user_id)
     if fill_result.get("screenshot_b64"): state["screenshot_b64"] = fill_result["screenshot_b64"]
     state["current_node"] = "fill_form"; state["browser_launched"] = True
-    state.setdefault("audit_entries", []).append({"agent": "form_filler", "node": "fill_form", "action": "fill_via_mcp", "output": f"{fields_filled} fields, OTP={otp_detected}", "latency_ms": round((time.time() - start) * 1000, 1)})
+    state.setdefault("audit_entries", []).append({"agent": "form_filler", "node": "fill_form", "action": "fill_via_mcp", "output": f"{fields_filled} fields, OTP={otp_detected}, login={login_detected}", "latency_ms": round((time.time() - start) * 1000, 1)})
     return state
 
 

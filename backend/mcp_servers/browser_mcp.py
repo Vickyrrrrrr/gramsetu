@@ -17,6 +17,9 @@ All tools operate on Playwright browser instances managed per session.
 import os
 import asyncio
 import base64
+import json as _json
+import random as _random
+import time as _time
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu Browser Server")
@@ -378,3 +381,111 @@ async def stop_session(session_id: str) -> dict:
         pass
 
     return {"stopped": True, "actions": results}
+
+
+# ── Session persistence for login ───────────────────────────
+_SESSION_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "data", "sessions"
+)
+os.makedirs(_SESSION_DIR, exist_ok=True)
+
+_active_auth_pins: dict = {}  # session_id → {"pin": "123456", "expires": time}
+
+
+@mcp.tool()
+async def expose_for_login(session_id: str) -> dict:
+    """
+    Prepare remote browser access so user can authenticate themselves.
+    Returns a URL the user can open to log in manually.
+    """
+    try:
+        page = await _get_or_create_page(session_id)
+        auth_pin = f"{_random.randint(100000, 999999)}"
+        _active_auth_pins[session_id] = {"pin": auth_pin, "expires": _time.time() + 300}
+
+        # The remote browser URL — in production serves via ngrok
+        browser_url = page.url
+        return {
+            "ready": True,
+            "auth_pin": auth_pin,
+            "current_url": browser_url,
+            "message": (
+                f"🔐 Remote browser ready. Open this URL to log in manually.\n"
+                f"Current page: {browser_url}\n"
+                f"Auth PIN: {auth_pin} (expires in 5 min)\n"
+                f"After logging in, reply 'done' on chat."
+            ),
+        }
+    except Exception as e:
+        return {"ready": False, "error": str(e)}
+
+
+@mcp.tool()
+async def save_session(session_id: str) -> dict:
+    """Save browser cookies/session after successful login."""
+    try:
+        if session_id not in _contexts:
+            return {"saved": False, "error": "No active browser session"}
+        context = _contexts[session_id]
+        storage = await context.storage_state()
+        session_path = os.path.join(_SESSION_DIR, f"{session_id}.json")
+        with open(session_path, "w") as f:
+            _json.dump(storage, f)
+        return {"saved": True, "path": session_path}
+    except Exception as e:
+        return {"saved": False, "error": str(e)}
+
+
+@mcp.tool()
+async def restore_session(session_id: str) -> dict:
+    """Restore a previously saved browser session (cookies preserved)."""
+    session_path = os.path.join(_SESSION_DIR, f"{session_id}.json")
+    if not os.path.exists(session_path):
+        return {"restored": False, "error": "No saved session found"}
+
+    try:
+        with open(session_path) as f:
+            storage = _json.load(f)
+
+        from playwright.async_api import async_playwright
+
+        pw = await async_playwright().start()
+        browser = await pw.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        context = await browser.new_context(storage_state=storage)
+        page = await context.new_page()
+
+        _sessions[session_id] = {"pw": pw}
+        _browsers[session_id] = browser
+        _contexts[session_id] = context
+        _pages[session_id] = page
+
+        return {"restored": True, "cookies_loaded": True}
+    except Exception as e:
+        return {"restored": False, "error": str(e)}
+
+
+@mcp.tool()
+async def upload_file(session_id: str, field_label: str, file_content: str) -> dict:
+    """
+    Upload a file to a file input field. Used for DigiLocker document auto-attach.
+    file_content should be base64-encoded file data.
+    """
+    import base64 as _b64
+    import tempfile
+    try:
+        page = await _get_or_create_page(session_id)
+        file_bytes = _b64.b64decode(file_content)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
+
+        file_input = page.locator("input[type='file']").first
+        await file_input.set_input_files(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        return {"uploaded": True, "field": field_label}
+    except Exception as e:
+        return {"uploaded": False, "error": str(e)}

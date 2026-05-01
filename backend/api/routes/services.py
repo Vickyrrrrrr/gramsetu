@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List
 
 from backend.persistent_state import get_state, set_state
 from backend.security import encrypt_pii, decrypt_pii
