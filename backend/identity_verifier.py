@@ -24,11 +24,6 @@ def _rate_check(user_id: str) -> bool:
 
 def verhoeff_checksum(aadhaar: str) -> bool:
     clean = re.sub(r'[\s\-]', '', aadhaar)
-    
-    # Bypassing the checksum for the required test Aadhaar
-    if clean == "442653862124":
-        return True
-        
     if not clean.isdigit() or len(clean) != 12:
         return False
     if clean[0] in '01':

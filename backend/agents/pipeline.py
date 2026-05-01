@@ -50,6 +50,7 @@ _FORM_INTENT_KEYWORDS = {
     "jandhan", "jan dhan", "jandhan", "kcc", "credit",
     "scheme", "yojana", "योजना", "help", "start", "hello", "hi", "नमस्ते",
     "form", "fill", "apply", "register", "registration", "आवेदन", "फ़ॉर्म",
+    "government", "non-government", "private"
 }
 
 
@@ -92,6 +93,7 @@ async def _llm_respond(key_message: str, context: dict, lang: str, user_id: str 
             {"role": "system", "content": (
                 "You are GramSetu, a warm, helpful AI assistant for rural Indian citizens. "
                 "Respond conversationally in the user's language. "
+                "If the user selects 'Government Form' or 'Non-Government Form', acknowledge their choice and ask which specific form they need. "
                 "Use WhatsApp-friendly formatting: *bold* for emphasis. "
                 "Be concise — 2-5 sentences max. Sound like a helpful government officer. "
                 f"Current language: {lang}. Context: {ctx_json}"
@@ -112,6 +114,7 @@ async def _call_llm_with_tools(text: str, lang: str, context: dict = None) -> di
         catalog = router.get_tool_prompt()
         system = f"""You are GramSetu, an AI form-filling agent. You have MCP tools.
 {catalog}
+If the user selects 'Government Form' or 'Non-Government Form', acknowledge their choice and ask which specific form they need.
 When you need a tool, respond with: {{"tool": "server.tool_name", "args": {{"param": "value"}}}}
 Otherwise respond conversationally."""
         if context: system += f"\n\nCurrent State: {json.dumps(context, indent=2)}"
@@ -342,7 +345,7 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
     detected = None
     try:
         from backend.llm_client import chat_intent
-        result = await chat_intent([{"role": "system", "content": "Classify user intent. Return ONLY: {\"intent\": \"<form_name_or_query_type>\", \"confidence\": 0.95}. If form → snake_case name. If scheme query → \"scheme_suggest\". If greeting → \"help\". If unknown → \"unknown\"."}, {"role": "user", "content": text}], temperature=0.0, max_tokens=80)
+        result = await chat_intent([{"role": "system", "content": "Classify user intent. Return ONLY: {\"intent\": \"<form_name_or_query_type>\", \"confidence\": 0.95}. If form → snake_case name. If scheme query → \"scheme_suggest\". If greeting → \"help\". If user chooses government/non-government → \"form_type_selection\". If unknown → \"unknown\"."}, {"role": "user", "content": text}], temperature=0.0, max_tokens=80)
         if result:
             m = _regex.search(r'\{.*\}', result, _regex.DOTALL)
             if m: parsed = json.loads(m.group(0)); detected = parsed.get("intent", "")
@@ -351,12 +354,16 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
         lower = text.lower()
         for kw, intent in {"ration": "ration_card", "pension": "pension", "pan": "pan_card", "voter": "voter_id", "kisan": "pm_kisan", "ayushman": "ayushman_bharat", "mnrega": "mnrega", "jandhan": "jan_dhan", "birth": "birth_certificate", "caste": "caste_certificate", "kcc": "kisan_credit_card", "scheme": "scheme_suggest", "yojana": "scheme_suggest", "form": "generic", "apply": "generic"}.items():
             if kw in lower: detected = intent; break
-    if detected and detected not in ("scheme_suggest", "help", "unknown"): state["form_type"] = detected; state["next_node"] = "collect_data"; state["status"] = GraphStatus.ACTIVE.value
+    if detected and detected not in ("scheme_suggest", "help", "unknown", "form_type_selection"): state["form_type"] = detected; state["next_node"] = "collect_data"; state["status"] = GraphStatus.ACTIVE.value
     elif detected == "scheme_suggest":
         try:
             from backend.schemes import discover_from_message; result = await discover_from_message(text, lang)
             state["response"] = result.get("message", "")
         except: pass
+        state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "detect_intent"
+    elif detected == "form_type_selection":
+        prefix = await _llm_respond("Acknowledge their choice of Government/Non-Government form and ask which specific form they need.", {"action": "detect_intent"}, lang, state.get("user_id", ""))
+        state["response"] = prefix if prefix else "Which specific form do you need?"
         state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "detect_intent"
     else: state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "detect_intent"
     state["current_node"] = "detect_intent"

@@ -27,11 +27,11 @@ const LANG_MAP: Record<string, string> = {
 
 const INITIAL_MSG: Message = {
   id: 'init', role: 'assistant',
-  text: 'I\'m GramSetu — your AI assistant for government forms.\n\n• Apply for any scheme or service\n• I fill forms on real portals\n• Speak or type in any Indian language\n\nWhat do you need today?',
+  text: 'Namaste! I\'m GramSetu — your AI assistant.\n\nDo you want to fill a **Government Form** (like schemes or IDs) or a **Non-Government Form** (like private jobs, school applications)?',
 }
 
 const QUICK = [
-  'Ration Card', 'PM-KISAN', 'Ayushman', 'PAN Card', 'Pension', 'Voter ID',
+  'Government Form', 'Non-Government Form', 'Ration Card', 'PM-KISAN'
 ]
 
 /* ═══════════════════════════════════════════════════════════════
