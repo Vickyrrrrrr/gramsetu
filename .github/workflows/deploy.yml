@@ -28,9 +28,8 @@ jobs:
             cd /home/ubuntu/Gramsetu
             git fetch origin main
             git reset --hard origin/main
-            # Use docker-compose to handle everything (Backend + Webapp)
-            docker-compose down
-            docker-compose up -d --build
-            sleep 15
-            docker ps
+            # Hybrid Setup: Only restart the backend
+            docker-compose pull
+            docker-compose up -d --build backend
+            sleep 10
             docker logs gramsetu-backend --tail 20

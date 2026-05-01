@@ -2,7 +2,7 @@ FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
 RUN apk add --no-cache libc6-compat
-RUN npm install --legacy-peer-deps
+RUN rm -f package-lock.json && npm install --legacy-peer-deps
 
 FROM node:20-alpine AS builder
 WORKDIR /app

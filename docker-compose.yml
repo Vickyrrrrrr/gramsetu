@@ -23,16 +23,3 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       retries: 3
-
-  webapp:
-    build:
-      context: ./webapp
-      dockerfile: Dockerfile
-    container_name: gramsetu-webapp
-    ports:
-      - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://144.24.106.68:8000
-    depends_on:
-      - backend
-    restart: unless-stopped
