@@ -201,11 +201,12 @@ def rate_check(namespace: str, user_id: str, max_calls: int, window_seconds: int
 
 def cleanup_expired() -> int:
     """Remove all expired entries. Returns count removed."""
-    try:lient = _get_client()
+    try:
+        import time
+        client = _get_client()
         # Delete where expires_at is not null and less than current time
         res = client.table("kv_store").delete().not_.is_("expires_at", "null").lt("expires_at", time.time()).execute()
         return len(res.data) if res.data else 0
     except Exception as e:
-        print(f"[State] cleanup_expired error: {e}").rowcount
-    except Exception:
+        print(f"[State] cleanup_expired error: {e}")
         return 0
