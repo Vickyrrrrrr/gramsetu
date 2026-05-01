@@ -252,10 +252,46 @@ async def voice_mode_node(state: GramSetuState) -> GramSetuState:
 async def document_scan_node(state: GramSetuState) -> GramSetuState:
     msg_type = state.get("message_type", "text"); raw_message = state.get("raw_message", "")
     lang = state.get("language", "hi")
-    if msg_type != "image" or not raw_message or len(raw_message) < 500: state["next_node"] = "collect_data"; state["current_node"] = "document_scan"; return state
+    if msg_type != "image" or not raw_message or len(raw_message) < 500:
+        state["next_node"] = "collect_data"; state["current_node"] = "document_scan"; return state
+
     try:
         from backend.llm_client import chat_vision
-        vlm_result = await chat_vision(raw_message, "Extract ALL visible text from this Indian document photo. Return JSON: {\"extracted_data\": {...}, \"document_type\": \"...\", \"confidence\": 0.9}", temperature=0.0, max_tokens=1024)
+
+        # First: detect document type — Aadhaar/ID vs Resume/CV vs unknown
+        classify_prompt = "Is this a resume/CV or a government ID document? Reply with ONLY one word: 'resume', 'aadhaar', 'pan', 'government_id', or 'unknown'."
+        doc_type_raw = await chat_vision(raw_message, classify_prompt, temperature=0.0, max_tokens=10)
+        doc_type = (doc_type_raw or "").strip().lower()
+
+        # ── CV/Resume path ──────────────────────────────
+        if doc_type == "resume" or "resume" in doc_type or "cv" in doc_type:
+            from backend.cv_scanner import scan_and_store_resume
+            result = await scan_and_store_resume(state.get("user_id", ""), raw_message)
+            if result.get("extracted"):
+                state["response"] = await _llm_respond(
+                    f"Resume scanned — {result.get('fields_extracted', 0)} fields extracted. "
+                    f"Name: {result.get('name', '')}. Skills: {result.get('skills_count', 0)}. "
+                    f"Experience: {result.get('experience_years', 0)} years. "
+                    f"Your data is now stored and will auto-fill all future forms. "
+                    f"Now tell me — what form do you need?",
+                    {"resume_scanned": True, "fields": result.get("fields_extracted", 0)},
+                    lang, state.get("user_id", ""),
+                )
+            else:
+                state["response"] = await _llm_respond(
+                    "Couldn't read the resume clearly. Please send a clearer photo or type your details.",
+                    {}, lang, state.get("user_id", ""),
+                )
+            state["current_node"] = "document_scan"
+            state["next_node"] = "collect_data"
+            state["_cv_scanned"] = True
+            return state
+
+        # ── Government ID path (Aadhaar/PAN) ────────────
+        vlm_result = await chat_vision(raw_message,
+            'Extract ALL visible text from this Indian document photo. '
+            'Return JSON: {"extracted_data": {...}, "document_type": "...", "confidence": 0.9}',
+            temperature=0.0, max_tokens=1024)
         if vlm_result:
             m = _regex.search(r'\{.*\}', vlm_result, _regex.DOTALL)
             if m:
@@ -363,6 +399,21 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
                     state["confidence_scores"].update({k: 0.95 for k in dl_data})
                     collected_this_round = True
                     state["_dl_fetched"] = True
+        except Exception:
+            pass
+
+    # ── CV auto-fill for non-government forms ──
+    if not is_govt_form and not existing_data.get("_cv_fetched"):
+        try:
+            from backend.cv_scanner import get_cv_data, map_cv_to_form_fields
+            cv_data = get_cv_data(state.get("user_id", ""))
+            if cv_data.get("found"):
+                cv_fields = map_cv_to_form_fields(cv_data, required)
+                if cv_fields:
+                    existing_data.update(cv_fields)
+                    state["confidence_scores"].update({k: 0.85 for k in cv_fields})
+                    collected_this_round = True
+                    state["_cv_fetched"] = True
         except Exception:
             pass
 
