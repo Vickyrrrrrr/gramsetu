@@ -109,11 +109,12 @@ async def chat_api(request: Request):
     message = body.get("message", "")
     user_id = body.get("user_id", "web-user")
     phone = body.get("phone", "") or ""
+    message_type = body.get("message_type", "text")
     if not phone or phone in ("9999999999", "test", "0"):
         phone = user_id
     if not message:
         raise HTTPException(status_code=400, detail="'message' is required")
-    result = await _process(user_id, phone, message, "text")
+    result = await _process(user_id, phone, message, message_type)
     screenshot_url = f"data:image/png;base64,{result.get('screenshot_b64', '')}" if result.get("screenshot_b64") else None
     pdf_base64 = result.get("pdf_base64", "")
     return JSONResponse({

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Send, Loader2, X, Mic, MicOff, Activity, RefreshCw, Globe, Monitor, Volume2, Database, Wifi, WifiOff, Camera } from 'lucide-react'
+import { Send, Loader2, X, Mic, MicOff, Activity, RefreshCw, Globe, Monitor, Volume2, Database, Wifi, WifiOff, Camera, User, FileImage } from 'lucide-react'
 
 /* ═══════════════════════════════════════════════════════════════
    TYPES
@@ -238,12 +238,17 @@ export default function AppPage() {
   const [progressStep, setProgressStep] = useState('')
   const [progressPct, setProgressPct] = useState(0)
   const [screenshotModal, setScreenshotModal] = useState<string | null>(null)
+  const [selfieOpen, setSelfieOpen] = useState(false)
+  const [cameraError, setCameraError] = useState('')
+  const [capturedSelfie, setCapturedSelfie] = useState<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const mediaRecRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
 
   function loadMessages(id: string): Message[] | null {
     try { return JSON.parse(localStorage.getItem(`gs_c_${id}`) || 'null') } catch { return null }
@@ -451,6 +456,72 @@ export default function AppPage() {
     if (file) uploadDocument(file)
     if (e.target) e.target.value = ''
   }
+
+  /* ── live selfie camera ── */
+  const startCamera = useCallback(async () => {
+    setCameraError(''); setCapturedSelfie(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
+        videoRef.current.play()
+      }
+    } catch {
+      setCameraError('Camera access denied. Please allow camera permission or upload a photo instead.')
+    }
+  }, [])
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null
+    }
+  }, [])
+
+  const captureSelfie = useCallback(() => {
+    const video = videoRef.current
+    if (!video || !video.videoWidth) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0)
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.92)
+    setCapturedSelfie(dataUrl)
+    stopCamera()
+  }, [stopCamera])
+
+  const sendSelfie = useCallback(async () => {
+    if (!capturedSelfie) return
+    const base64 = capturedSelfie.split(',')[1]
+    addMsg('user', '📸 Selfie captured')
+    setStatus('loading'); setSelfieOpen(false); setCapturedSelfie(null)
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: base64, user_id: userId, phone: phone || '', language: lang, message_type: 'image' }),
+      })
+      if (!r.ok) throw new Error('')
+      const d = await r.json()
+      addMsg('assistant', d.response || 'Selfie processed.', { screenshotUrl: d.screenshot_url || null, receiptUrl: d.receipt_url || null })
+      if (d.voice_mode) setVoiceMode(true)
+    } catch {
+      addMsg('system', '⚠️ Selfie upload failed. Try again or type your info instead.')
+    } finally { setStatus('idle') }
+  }, [capturedSelfie, userId, phone, lang, addMsg])
+
+  useEffect(() => {
+    if (selfieOpen) startCamera()
+    else { stopCamera(); setCapturedSelfie(null); setCameraError('') }
+  }, [selfieOpen, startCamera, stopCamera])
 
   /* ── simple voice (MediaRecorder upload) ── */
   const stopVoice = useCallback(() => {
@@ -676,12 +747,17 @@ export default function AppPage() {
           {recording ? <><Send size={14} /><span className="text-xs font-medium">Send</span></> : <Mic size={14} />}
         </button>
 
-        <input type="file" accept="image/*" capture="environment" ref={fileInputRef}
+        <input type="file" accept="image/*" ref={fileInputRef}
           onChange={handleFileChange} className="hidden" />
         <button onClick={() => fileInputRef.current?.click()}
           className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors"
           style={{ background: '#f5f5f5', color: '#666' }} title="Upload Aadhaar / Document photo">
-          <Camera size={14} />
+          <FileImage size={14} />
+        </button>
+        <button onClick={() => setSelfieOpen(true)}
+          className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors"
+          style={{ background: '#f5f5f5', color: '#666' }} title="Take a live selfie">
+          <User size={14} />
         </button>
 
         <button onClick={() => send()} disabled={!input.trim() || status === 'loading'}
@@ -721,6 +797,50 @@ export default function AppPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,.7)' }} onClick={() => setScreenshotModal(null)}>
           <button onClick={() => setScreenshotModal(null)} className="absolute top-4 right-4 text-white text-2xl">×</button>
           <img src={screenshotModal} alt="Screenshot" className="max-w-full max-h-[90vh] rounded-lg" onClick={e => e.stopPropagation()} />
+        </div>
+      )}
+
+      {selfieOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,.6)' }} onClick={() => setSelfieOpen(false)}>
+          <div className="bg-white rounded-2xl mx-4 w-full max-w-sm overflow-hidden" style={{ border: '1px solid #eee' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: '#eee' }}>
+              <span className="text-sm font-semibold">{capturedSelfie ? 'Review Selfie' : 'Take a Selfie'}</span>
+              <button onClick={() => setSelfieOpen(false)} className="p-1 opacity-50 hover:opacity-100"><X size={16} /></button>
+            </div>
+            <div className="relative bg-black aspect-[3/4] flex items-center justify-center">
+              {!capturedSelfie ? (
+                <>
+                  <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
+                  {cameraError && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-6">
+                      <p className="text-white text-sm text-center">{cameraError}</p>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <img src={capturedSelfie} alt="Captured selfie" className="w-full h-full object-cover" />
+              )}
+            </div>
+            <div className="px-4 py-3 flex gap-2">
+              {!capturedSelfie ? (
+                <button onClick={captureSelfie} disabled={!!cameraError}
+                  className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white bg-black disabled:opacity-30 flex items-center justify-center gap-2">
+                  <Camera size={16} /> Capture
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => { setCapturedSelfie(null); startCamera() }}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium border" style={{ borderColor: '#e5e5e5' }}>
+                    Retake
+                  </button>
+                  <button onClick={sendSelfie}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white bg-black flex items-center justify-center gap-2">
+                    <Send size={14} /> Send
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
