@@ -326,8 +326,19 @@ async def transcribe_node(state: GramSetuState) -> GramSetuState:
     state["current_node"] = "transcribe"
     if state.get("challenge_otp"): state["next_node"] = "phone_challenge"
     elif state.get("message_type") == "image" and state.get("identity_verified"):
-        from backend.secure_enclave import has_security_enrolled
-        if not has_security_enrolled(state.get("user_id", "")):
+        from backend.secure_enclave import has_security_enrolled, is_pin_set
+        uid = state.get("user_id", "")
+        if not has_security_enrolled(uid):
+            if not is_pin_set(uid):
+                # PIN isn't even set — ignore image, remind to set PIN
+                state["response"] = await _llm_respond(
+                    "Received an image but PIN is not set yet. Ask user to set their 4-digit PIN first before sending a selfie.",
+                    {}, state.get("language", "hi"), uid
+                )
+                state["status"] = GraphStatus.WAIT_USER.value
+                state["next_node"] = "security_enroll"
+                state["current_node"] = "transcribe"
+                return state
             state["next_node"] = "security_enroll"
         else:
             state["next_node"] = "document_scan"
