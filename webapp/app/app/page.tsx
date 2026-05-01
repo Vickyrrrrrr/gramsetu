@@ -654,7 +654,7 @@ export default function AppPage() {
       {/* RECORDING INDICATOR */}
       {recording && (
         <div className="px-3 py-1.5 text-xs text-red-700 bg-red-50 border-t border-red-100 flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Recording {recordingTime}s · tap mic to stop {recordingTime >= 28 ? '(auto-stop soon)' : ''}
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> Recording {recordingTime}s · tap send when done {recordingTime >= 28 ? '(auto-send soon)' : ''}
         </div>
       )}
 
@@ -668,9 +668,9 @@ export default function AppPage() {
           style={{ border: '1px solid #e5e5e5', minHeight: 40, maxHeight: 120, lineHeight: 1.5 }} />
 
         <button onClick={recording ? stopVoice : startVoice}
-          className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center transition-colors"
-          style={{ background: recording ? '#dc2626' : '#f5f5f5', color: recording ? '#fff' : '#666' }} title={recording ? 'Stop' : 'Voice'}>
-          {recording ? <MicOff size={14} /> : <Mic size={14} />}
+          className={`flex-shrink-0 h-9 rounded-full flex items-center justify-center transition-colors ${recording ? 'px-3 gap-1.5' : 'w-9'}`}
+          style={{ background: recording ? '#dc2626' : '#f5f5f5', color: recording ? '#fff' : '#666' }} title={recording ? 'Send Voice' : 'Voice'}>
+          {recording ? <><Send size={14} /><span className="text-xs font-medium">Send</span></> : <Mic size={14} />}
         </button>
 
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef}
