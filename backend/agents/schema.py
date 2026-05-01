@@ -97,9 +97,10 @@ class GramSetuState(TypedDict, total=False):
     screenshot_path: str
     otp_field_position: dict    # {"x": int, "y": int}
 
-    # ── Conversation Memory ────────────────────────────────────
-    conversation_history: list   # Last N exchanges [{role, text}]
-    last_collected_at: float     # Timestamp of last collect_data run
+    # ── Smart Collection (non-gov forms) ────────────────────────
+    _inferred_fields: list     # LLM-inferred required fields for this form
+    _field_groups: list        # LLM-grouped field clusters by topic
+    _current_group: int        # Which group we're collecting now
 
     # ── Audit ────────────────────────────────────────────────
     audit_entries: list         # Reasoning trail for this session

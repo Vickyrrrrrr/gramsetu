@@ -196,3 +196,107 @@ def _manual_extract(text: str, required_fields: list[str]) -> dict:
         "missing_fields": missing,
         "sources": {},
     }
+
+
+async def group_fields_by_topic(fields: list[str], form_type: str) -> list[dict]:
+    """
+    LLM groups 15-30 fields into 3-5 topic clusters for conversational collection.
+    Returns: [{"topic": "Company Details", "fields": ["company_name", ...]}]
+    """
+    if len(fields) <= 6:
+        return [{"topic": "All Details", "fields": fields}]
+
+    try:
+        from backend.llm_client import chat_intent
+        prompt = (
+            f"I have {len(fields)} fields for a '{form_type}' application: {', '.join(fields[:30])}. "
+            "Group these fields into 3-5 logical topic clusters. "
+            "Return ONLY JSON: [{\"topic\": \"short name\", \"fields\": [\"field1\", \"field2\"]}]."
+        )
+        result = await chat_intent(
+            [{"role": "system", "content": "Group form fields into topics. Return ONLY valid JSON array."},
+             {"role": "user", "content": prompt}], temperature=0.1, max_tokens=600
+        )
+        if result:
+            m = re.search(r'\[.*\]', result, re.DOTALL)
+            if m:
+                groups = json.loads(m.group(0))
+                if isinstance(groups, list) and len(groups) >= 2:
+                    return groups
+    except Exception as e:
+        print(f"[DigiLocker] Grouping failed: {e}")
+
+    # Fallback: auto-group by field name prefixes
+    return _auto_group_fields(fields)
+
+
+def _auto_group_fields(fields: list[str]) -> list[dict]:
+    """Auto-group by field name prefixes if LLM grouping fails."""
+    groups = {}
+    topic_map = {
+        "name": "Personal Details", "founder": "Founder & Background",
+        "cofounder": "Founder & Background", "education": "Founder & Background",
+        "background": "Founder & Background",
+        "company": "Company Details", "description": "Company Details",
+        "problem": "Company Details", "solving": "Company Details",
+        "story": "Company Details", "founding": "Company Details",
+        "product": "Product & Tech", "tech": "Product & Tech",
+        "market": "Market & Traction", "revenue": "Market & Traction",
+        "growth": "Market & Traction", "users": "Market & Traction",
+        "competitor": "Market & Traction", "traction": "Market & Traction",
+        "team": "Team", "hire": "Team",
+        "financial": "Financial", "funding": "Financial",
+        "objective": "Goals & Fit", "why": "Goals & Fit",
+        "achievement": "Goals & Fit", "goal": "Goals & Fit",
+    }
+    for field in fields:
+        matched = False
+        for key, topic in topic_map.items():
+            if key in field.lower():
+                groups.setdefault(topic, []).append(field)
+                matched = True
+                break
+        if not matched:
+            groups.setdefault("Additional Details", []).append(field)
+
+    return [{"topic": t, "fields": fs} for t, fs in groups.items()]
+
+
+async def generate_group_question(
+    topic: str, fields: list[str], form_type: str,
+    collected_count: int, total_count: int,
+) -> str:
+    """
+    LLM generates a natural paragraph-style question for a group of related fields.
+    Example: "Tell me about your company — what's it called, what problem
+              are you solving, how did you come up with the idea?"
+    """
+    if len(fields) <= 3:
+        field_list = " and ".join(f.replace("_", " ").title() for f in fields)
+        return f"Please share your *{field_list}*."
+
+    try:
+        from backend.llm_client import chat_intent
+        prompt = (
+            f"You are helping a user fill a '{form_type}' application. "
+            f"You need to collect these fields about '{topic}': {', '.join(f.title().replace('_',' ') for f in fields)}. "
+            f"So far {collected_count}/{total_count} fields collected. "
+            f"Generate ONE warm, natural question (2-3 sentences) asking about ALL these fields at once. "
+            f"Use examples, make it conversational. User will respond with a paragraph. "
+            f"Be encouraging and specific. Do NOT list fields separately — weave them into a natural question."
+        )
+        result = await chat_intent(
+            [{"role": "system", "content": "Generate natural, warm questions. 2-3 sentences. Be conversational."},
+             {"role": "user", "content": prompt}], temperature=0.7, max_tokens=200
+        )
+        if result and len(result.strip()) > 10:
+            return result.strip()
+    except Exception as e:
+        print(f"[DigiLocker] Question generation failed: {e}")
+
+    # Fallback
+    field_list = ", ".join(f.replace("_", " ").title() for f in fields[:8])
+    return (
+        f"Tell me about your *{topic}* — specifically: {field_list}. "
+        f"Write freely, I'll extract the details."
+    )

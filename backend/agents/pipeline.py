@@ -331,7 +331,7 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
 async def collect_data_node(state: GramSetuState) -> GramSetuState:
     start = time.time(); text = state.get("transcribed_text", ""); form_type = state.get("form_type", "generic"); lang = state.get("language", "hi")
     await _broadcast_progress(state.get("session_id", ""), PROGRESS_STEPS[3], 0.45, [{"id": 1, "label": "Verify Identity", "done": True}, {"id": 2, "label": "Understand Request", "done": True}, {"id": 3, "label": "Collect Information", "done": True, "active": True}, {"id": 4, "label": "Validate Data", "done": False}], state.get("user_id", ""))
-    from backend.digilocker_client import extract_with_llm, _get_form_template, _manual_extract, infer_form_fields
+    from backend.digilocker_client import extract_with_llm, _get_form_template, _manual_extract, infer_form_fields, group_fields_by_topic, generate_group_question
     existing_data = state.get("form_data", {}); user_context = text if text else ""; collected_this_round = False
     history = state.get("conversation_history", []); history.append({"role": "user", "text": text})
     if len(history) > 20:
@@ -349,7 +349,8 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
 
     # ── DigiLocker auto-fetch for known government forms ──
     from backend.agents.portal_registry import is_known_form
-    if is_known_form(form_type) and not existing_data.get("_dl_fetched"):
+    is_govt_form = is_known_form(form_type)
+    if is_govt_form and not existing_data.get("_dl_fetched"):
         try:
             from backend.mcp_tool_router import get_router
             rtr = get_router()
@@ -364,7 +365,62 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
                     state["_dl_fetched"] = True
         except Exception:
             pass
-    if user_context:
+
+    # ── SMART COLLECTION: Grouped paragraphs for non-gov forms ──
+    if not is_govt_form and not existing_data.get("_dl_fetched"):
+        # Step 1: Group fields (done once)
+        groups = state.get("_field_groups", [])
+        current_group = state.get("_current_group", 0)
+        if not groups and required:
+            groups = await group_fields_by_topic(required, form_type)
+            state["_field_groups"] = groups
+            state["_current_group"] = 0
+
+        # Step 2: Extract from user's paragraph-style response
+        if user_context and current_group > 0 and groups:
+            group_fields = groups[current_group - 1].get("fields", [])
+            if group_fields:
+                quick = _manual_extract(user_context, group_fields)
+                quick_data = quick.get("extracted_data", {})
+                if quick_data:
+                    existing_data.update(quick_data)
+                    collected_this_round = True
+                # Also try LLM extraction for deeper understanding
+                extract_ctx = f"ALREADY COLLECTED: {json.dumps(existing_data, ensure_ascii=False)}\nUSER PARAGRAPH: {user_context}"
+                try:
+                    extraction = await extract_with_llm(extract_ctx, form_type)
+                    extracted = extraction.get("extracted_data", {})
+                    if extracted:
+                        existing_data.update(extracted)
+                        collected_this_round = True
+                except: pass
+                state["_last_group_text"] = ""
+
+        # Step 3: Generate next group question
+        if current_group < len(groups):
+            group = groups[current_group]
+            collected = len([f for f in required if f in existing_data and existing_data[f]])
+            question = await generate_group_question(
+                group["topic"], group["fields"], form_type, collected, len(required)
+            )
+            progress_msg = f"({current_group + 1}/{len(groups)})" if len(groups) > 1 else ""
+            state["response"] = question + f"\n\n_{progress_msg}_"
+            state["_current_group"] = current_group + 1
+            state["status"] = GraphStatus.WAIT_USER.value
+            state["next_node"] = "collect_data"
+            state["current_node"] = "collect_data"
+            state["form_data"] = existing_data
+            return state
+        else:
+            # All groups done — proceed to validation
+            state["form_data"] = existing_data
+            state["next_node"] = "validate_confirm"
+            state["status"] = GraphStatus.ACTIVE.value
+            state["current_node"] = "collect_data"
+            return state
+
+    # ── Standard collection for government forms ──
+    if user_context and is_govt_form:
         quick = _manual_extract(user_context, required); quick_data = quick.get("extracted_data", {})
         if quick_data: existing_data.update(quick_data); collected_this_round = True
         history_summary = "\n".join(f"{h['role']}: {h['text'][:200]}" for h in history[-10:])
@@ -375,6 +431,7 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
             if extracted: existing_data.update(extracted); collected_this_round = True
         except: pass
         state["form_data"] = existing_data; state["confidence_scores"].update({k: 0.7 for k in quick_data})
+
     missing = [f for f in required if f not in existing_data or not existing_data[f]]
     collect_attempts = state.get("challenge_otp_attempts", 0)
     if not collected_this_round and missing:
