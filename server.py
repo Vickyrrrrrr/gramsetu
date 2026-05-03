@@ -73,7 +73,8 @@ async def startup():
 
 # ── Core processor ───────────────────────────────────────
 async def _process(user_id: str, phone: str, message: str, message_type: str = "text") -> dict:
-    message = sanitize_input(message)
+    if message_type not in ("image", "voice"):
+        message = sanitize_input(message)
     session = _user_sessions.get(phone, {})
     session_id = session.get("session_id")
     lang = detect_language(message) if message else "hi"
