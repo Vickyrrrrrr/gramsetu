@@ -130,13 +130,13 @@ function VaultPanel({ onClose, userId, onUseData }: {
       </div>
 
       {!unlocked ? (
-        <div className="flex-1 flex flex-col justify-center gap-3 px-5">
+        <form onSubmit={(e) => { e.preventDefault(); load(); }} className="flex-1 flex flex-col justify-center gap-3 px-5">
           <p className="text-xs text-gray-400 text-center">Enter your vault password</p>
           <input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Password"
             className="w-full px-3 py-2 rounded-lg text-sm border outline-none focus:border-black" />
-          <button onClick={load}
+          <button type="submit"
             className="w-full py-2 bg-black text-white rounded-lg text-xs font-medium">Unlock</button>
-        </div>
+        </form>
       ) : (
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
           {items.map(i => (
@@ -370,11 +370,11 @@ export default function AppPage() {
     setBrowserFrame(null); setBrowserStep(''); setBrowserPct(0); setProgressStep(''); setProgressPct(0)
   }
 
-  const callBackend = useCallback(async (text: string, phoneOverride?: string) => {
+  const callBackend = useCallback(async (text: string, phoneOverride?: string, messageType: string = 'text') => {
     if (!isOnline) { setErrorBanner('No internet connection'); return }
     setStatus('loading'); setLastFailedMsg(null)
     try {
-      const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, user_id: userId, phone: phoneOverride || phone || '', language: lang }) })
+      const r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, user_id: userId, phone: phoneOverride || phone || '', language: lang, message_type: messageType }) })
       if (!r.ok) throw new Error(`${r.status}`)
       const d = await r.json()
       if (d.language && LANG_MAP[d.language]) setLang(d.language)
@@ -405,13 +405,13 @@ export default function AppPage() {
     callBackend(toResend)
   }, [lastFailedMsg, callBackend])
 
-  const send = useCallback((override?: string) => {
+  const send = useCallback((override?: string, type: 'text' | 'voice' | 'otp' = 'text') => {
     const msg = (override ?? input).trim()
     if (!msg || status === 'loading') return
     setInput(''); addMsg('user', msg)
     const isForm = /form|apply|card|ration|pan|voter|pension|kisan|ayush|mnrega|jan dhan|birth|caste|register/i.test(msg)
     if (isForm && !phone) { setPendingPrompt(msg); setPhoneModal(true); return }
-    callBackend(msg)
+    callBackend(msg, undefined, type)
   }, [input, status, phone, addMsg, callBackend])
 
   const handlePhone = (n: string) => { setPhone(n); setPhoneModal(false); addMsg('system', `Phone: ${n.replace('+91', '+91 ')}`); if (pendingPrompt) { callBackend(pendingPrompt, n); setPendingPrompt(null) } }
@@ -552,7 +552,7 @@ export default function AppPage() {
             const data = await res.json()
             if (data.text) {
               setInput(data.text)
-              send(data.text)
+              send(data.text, 'voice')
             } else {
               setErrorBanner('Could not understand audio — try typing instead')
             }

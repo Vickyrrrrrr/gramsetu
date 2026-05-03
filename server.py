@@ -25,6 +25,7 @@ from lib.language_utils import detect_language
 from lib.voice_handler import transcribe_audio
 from backend.api.routes.whatsapp import router as whatsapp_router
 from backend.api.routes.meta_webhook import router as meta_webhook_router
+from backend.api.routes.services import router as services_router
 
 _user_sessions: dict[str, dict] = {}
 _completed_forms: dict[str, dict] = {}
@@ -51,6 +52,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.mount("/mock", StaticFiles(directory=os.path.join(STATIC_DIR, "backend", "static", "mock_portals")), name="mock")
 app.include_router(whatsapp_router)
 app.include_router(meta_webhook_router)
+app.include_router(services_router)
 
 # ── Startup ─────────────────────────────────────────────
 @app.on_event("startup")

@@ -103,28 +103,29 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
         <p className="text-sm mb-4" style={{ color: '#6B6B6B' }}>
           Enter the admin password to access the audit dashboard.
         </p>
-        <input
-          autoFocus
-          type="password"
-          placeholder="Password"
-          value={pw}
-          onChange={(e) => setPw(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
-          className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-3"
-          style={{
-            border: `1px solid ${error ? '#ef4444' : '#E5E5E0'}`,
-          }}
-        />
-        {error && (
-          <p className="text-xs text-red-600 mb-2">Incorrect password</p>
-        )}
-        <button
-          onClick={submit}
-          className="w-full py-2.5 rounded-lg text-sm font-medium transition-opacity"
-          style={{ background: '#0C0C0C', color: '#F7F6F3' }}
-        >
-          Unlock
-        </button>
+        <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <input
+            autoFocus
+            type="password"
+            placeholder="Password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-lg text-sm outline-none mb-3"
+            style={{
+              border: `1px solid ${error ? '#ef4444' : '#E5E5E0'}`,
+            }}
+          />
+          {error && (
+            <p className="text-xs text-red-600 mb-2">Incorrect password</p>
+          )}
+          <button
+            type="submit"
+            className="w-full py-2.5 rounded-lg text-sm font-medium transition-opacity"
+            style={{ background: '#0C0C0C', color: '#F7F6F3' }}
+          >
+            Unlock
+          </button>
+        </form>
         <Link
           href="/"
           className="block text-center text-xs mt-3"
