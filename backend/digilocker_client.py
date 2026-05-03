@@ -75,18 +75,12 @@ async def infer_form_fields(form_type: str, lang: str = "hi") -> list[str]:
     ]
 
 
-async def extract_with_llm(user_context: str, form_type: str) -> dict:
+async def extract_with_llm(user_context: str, form_type: str, required_fields: list[str] = None) -> dict:
     """
     Use the LLM to extract structured form data from free-text user input.
-
-    Args:
-        user_context: Free-text from the user describing their information
-        form_type: The form being filled
-
-    Returns:
-        Dict with extracted_data, confidence_scores, missing_fields
     """
-    required_fields = _get_form_template(form_type)
+    if not required_fields:
+        required_fields = []
 
     if not user_context or not user_context.strip():
         return {

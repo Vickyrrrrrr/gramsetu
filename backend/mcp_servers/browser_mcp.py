@@ -6,7 +6,6 @@ Exposes tools:
   - fill_field: Fill a single form field by label
   - click_button: Click a button by label
   - take_screenshot: Capture current page
-  - fill_form: Fill entire form from data dict
   - get_page_state: Get current page state/details
   - detect_otp: Check if OTP field is on page
   - stop_session: Stop browser session
@@ -24,11 +23,6 @@ from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu Browser Server")
 
-# ── Legacy alias for test compatibility ─────────────────────
-async def stagehand_fill(portal_url: str, form_data: dict, form_type: str,
-                         screenshot_path: str = "", headless: bool = False) -> dict:
-    """Legacy — delegates to Playwright fill_form. Returns empty stub."""
-    return {"success": False, "error": "Stagehand removed. Use fill_form tool instead."}
 
 # ── Browser session management ─────────────────────────────
 _sessions: dict[str, dict] = {}
@@ -227,42 +221,7 @@ async def take_screenshot(session_id: str, full_page: bool = False) -> dict:
         return {"success": False, "error": str(e)}
 
 
-@mcp.tool()
-async def fill_form(session_id: str, form_data: dict, form_type: str = "generic") -> dict:
-    """
-    Fill an entire form on the current page from a data dict.
-    Uses the VLM agent loop for intelligent field detection and filling.
 
-    Args:
-        session_id: Session identifier
-        form_data: Dict of field_name -> value
-        form_type: Type of form for field label matching
-    """
-    try:
-        from backend.agents.form_fill_agent import _playwright_fill
-    except ImportError:
-        return {"success": False, "error": "form_fill_agent module not available"}
-
-    page = await _get_or_create_page(session_id)
-    portal_url = page.url
-
-    result = await _playwright_fill(
-        portal_url=portal_url,
-        form_data=form_data,
-        form_type=form_type,
-        language="hi",
-        session_id=session_id,
-        max_steps=20,
-    )
-
-    return {
-        "success": result.success,
-        "fields_filled": result.fields_filled,
-        "otp_detected": result.otp_detected,
-        "screenshot_b64": result.screenshot_b64,
-        "error": result.error,
-        "steps_taken": result.steps_taken,
-    }
 
 
 @mcp.tool()

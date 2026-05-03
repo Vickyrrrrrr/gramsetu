@@ -31,32 +31,25 @@ async def discover_schemes(
     language: str = "hi",
     extra_keywords: Optional[str] = None,
 ) -> dict:
-    """
-    Discover eligible government schemes using LLM + web search.
-
-    The LLM searches real government websites and returns
-    current, accurate scheme information — not hardcoded data.
-
-    Falls back to local database if no LLM is available.
-
-    Args:
-        extra_keywords: Free-form hint string to guide LLM search
-                        (e.g. "farmer needs agricultural loan")
-    """
+    print(f"[Schemes] Starting discovery: age={age}, gender={gender}, occ={occupation}")
     # Try LLM-powered discovery first (Groq 70B with scheme knowledge)
     if get_active_provider() != "fallback":
         try:
+            print("[Schemes] Attempting LLM discovery...")
             llm_result = await _llm_discover(
                 age=age, gender=gender, income=income,
                 occupation=occupation, state=state,
                 language=language, extra_keywords=extra_keywords,
             )
             if llm_result and llm_result.get("count", 0) > 0:
+                print(f"[Schemes] LLM found {llm_result.get('count')} schemes")
                 return llm_result
+            print("[Schemes] LLM found 0 schemes, falling back to local...")
         except Exception as e:
-            print(f"[Schemes] LLM discovery failed, using local: {e}")
+            print(f"[Schemes] LLM discovery failed: {e}")
 
     # Fallback to local curated database (always works)
+    print("[Schemes] Using local database fallback")
     return _local_discover(age, gender, income, occupation, language)
 
 

@@ -516,3 +516,64 @@ def _fallback(messages: list) -> str:
             "Please provide your age, occupation, and income for accurate results."
         )
     return "I understand your request. Please provide more details so I can help you."
+
+
+async def _openai_compat_raw(
+    base_url: str,
+    api_key: str,
+    model: str,
+    messages: list,
+    temperature: float,
+    max_tokens: int,
+    tools: list = None,
+) -> dict:
+    for attempt in range(3):
+        try:
+            import httpx, asyncio
+            payload = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if tools:
+                payload["tools"] = tools
+                
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(
+                    base_url,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+            if response.status_code == 429:
+                wait = 2 ** attempt
+                await asyncio.sleep(wait)
+                continue
+            if response.status_code == 503 or response.status_code == 502:
+                wait = 2 ** attempt
+                await asyncio.sleep(wait)
+                continue
+            if response.status_code != 200:
+                print(f"[LLM] Error {response.status_code} at {base_url} (Model: {model}): {response.text[:300]}")
+                return {}
+            return response.json()["choices"][0]["message"]
+        except Exception as e:
+            wait = 2 ** attempt
+            if attempt < 2:
+                import asyncio
+                await asyncio.sleep(wait)
+            else:
+                return {}
+    return {}
+
+async def chat_with_tools(messages: list, tools: list, temperature: float = 0.1, max_tokens: int = 1024) -> dict:
+    if _groq_ok():
+        res = await _openai_compat_raw(f"{GROQ_URL}/chat/completions", GROQ_API_KEY, GROQ_MODEL_MAIN, messages, temperature, max_tokens, tools)
+        if res: return res
+    if _nim_ok():
+        return await _openai_compat_raw(f"{NVIDIA_URL}/chat/completions", NVIDIA_API_KEY, NIM_MODEL_GENERAL, messages, temperature, max_tokens, tools)
+    return {}
+

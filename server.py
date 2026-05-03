@@ -55,21 +55,66 @@ app.include_router(meta_webhook_router)
 app.include_router(services_router)
 
 # ── Startup ─────────────────────────────────────────────
+import subprocess
+
+def _spawn_mcp(name: str, port: int):
+    """Spawn an MCP server as a separate background process."""
+    print(f"[System] Spawning {name} MCP on localhost:{port}...")
+    import subprocess
+    cmd = [
+        sys.executable, "-m", "uvicorn", 
+        f"backend.mcp_servers.{name.lower()}_mcp:mcp.app",
+        "--host", "127.0.0.1", "--port", str(port), "--log-level", "error"
+    ]
+    try:
+        # No shell=True needed when using list of arguments
+        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        print(f"[System] Failed to spawn {name}: {e}")
+        return None
+
 @app.on_event("startup")
 async def startup():
     if sys.stdout.encoding != "utf-8":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    
+    # 1. Initialize Database
     try:
         db.init_db()
     except RuntimeError:
-        print("[DB] Supabase not configured - skipping database (prototype mode)")
+        print("[DB] Supabase not configured - prototype mode")
     except Exception as e:
         print(f"[DB] Database warning: {e}")
+
+    # 2. Start MCP servers as subprocesses
+    app.state.mcp_processes = {}
+    mcp_ports = {
+        "Browser": 8101,
+        "Audit": 8102,
+        "DigiLocker": 8103,
+        "WhatsApp": 8104
+    }
+    for name, port in mcp_ports.items():
+        proc = _spawn_mcp(name, port)
+        if proc:
+            app.state.mcp_processes[name] = proc
+
+    # 3. Print Header
     from backend.llm_client import _groq_ok, _nim_ok, _sarvam_ok, GROQ_MODEL_MAIN
-    print(f"\nGramSetu API | Chat: {'OK Sarvam' if _sarvam_ok() else 'NO KEY'} | Groq: {'OK' if _groq_ok() else 'NO KEY'} "
-          f"| NVIDIA: {'OK' if _nim_ok() else 'NO KEY'} | Sarvam STT/TTS: {'OK' if _sarvam_ok() else 'NO KEY'}")
-    print(f"Chat/Intent: Groq {GROQ_MODEL_MAIN} | Vision: NVIDIA | STT/TTS: Sarvam")
-    print(f"API Docs: http://localhost:{os.getenv('PORT','8000')}/docs\n")
+    print("\n" + "="*60)
+    print("GramSetu Backend | Production ReAct Architecture")
+    print(f"Chat: {'OK Sarvam' if _sarvam_ok() else 'OK Groq'} | Vision: {'OK NVIDIA' if _nim_ok() else 'NO KEY'}")
+    print(f"MCP Servers: {' | '.join(mcp_ports.keys())}")
+    print(f"API Docs: http://127.0.0.1:8000/docs")
+    print("="*60 + "\n")
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Cleanup MCP processes on exit."""
+    if hasattr(app.state, "mcp_processes"):
+        for name, proc in app.state.mcp_processes.items():
+            print(f"[System] Terminating {name} MCP...")
+            proc.terminate()
 
 # ── Core processor ───────────────────────────────────────
 async def _process(user_id: str, phone: str, message: str, message_type: str = "text") -> dict:
@@ -298,15 +343,72 @@ async def voice_output(request: Request):
 # ── Schemes ─────────────────────────────────────────────
 @app.post("/api/schemes")
 async def discover_user_schemes(request: Request):
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        
     lang = body.get("language", "hi")
     try:
-        result = await discover_schemes(age=body.get("age"), gender=body.get("gender"), income=body.get("income"), occupation=body.get("occupation"), language=lang)
+        print(f"[Schemes] Discovering for body: {body}")
+        result = await discover_schemes(
+            age=body.get("age"), 
+            gender=body.get("gender"), 
+            income=body.get("income"), 
+            occupation=body.get("occupation"), 
+            language=lang
+        )
+        if not result or "count" not in result:
+            return JSONResponse({"count": 0, "message": "No schemes found.", "schemes": []})
+            
+        _impact["schemes_discovered"] += result.get("count", 0)
+        
+        schemes = []
+        for idx, s in enumerate(result.get("eligible", []), start=1):
+            name = s.get(f"name_{lang}") or s.get("name") or s.get("name_en") or "Unknown Scheme"
+            schemes.append({
+                "id": s.get("id", f"scheme_{idx}"),
+                "name": name,
+                "benefit": s.get("benefit", ""),
+                "emoji": s.get("emoji", "📋")
+            })
+            
+        return JSONResponse({
+            "count": result["count"], 
+            "message": result["message"], 
+            "schemes": schemes
+        })
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scheme discovery failed: {e}")
-    _impact["schemes_discovered"] += result["count"]
-    schemes = [{"id": s.get("id", f"scheme_{idx}"), "name": s.get(f"name_{lang}") or s.get("name") or s.get("name_en") or "Unknown Scheme", "benefit": s.get("benefit", ""), "emoji": s.get("emoji", "📋")} for idx, s in enumerate(result.get("eligible", []), start=1)]
-    return JSONResponse({"count": result["count"], "message": result["message"], "schemes": schemes})
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Scheme discovery failed: {str(e)}")
+
+# ── Document Upload & Vision ──────────────────────────────
+@app.post("/api/upload/{user_id}")
+async def upload_document(user_id: str, file: UploadFile):
+    upload_dir = os.path.join(STATIC_DIR, "uploads", user_id)
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, file.filename)
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+    from backend.vision_agent import scan_document_with_vlm
+    result = await scan_document_with_vlm(file_path, "government_form")
+    state = await _get_state(user_id)
+    if "extracted_data" in result:
+        state["form_data"].update(result["extracted_data"])
+        await _save_state(user_id, state)
+    return JSONResponse({"success": True, "extracted": list(result.get("extracted_data", {}).keys())})
+
+# ── Voice / Audio ─────────────────────────────────────────
+@app.post("/api/voice/{user_id}")
+async def process_voice(user_id: str, file: UploadFile):
+    temp_path = os.path.join(STATIC_DIR, "temp", f"voice_{user_id}_{file.filename}")
+    os.makedirs(os.path.dirname(temp_path), exist_ok=True)
+    with open(temp_path, "wb") as f:
+        f.write(await file.read())
+    from backend.llm_client import transcribe_audio
+    text = await transcribe_audio(temp_path)
+    return JSONResponse({"text": text})
 
 # ── OTP Resume ────────────────────────────────────────────
 @app.post("/api/otp/{user_id}")

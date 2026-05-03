@@ -39,11 +39,11 @@ from backend.api.routes.whatsapp import router as whatsapp_router
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 from backend.storage import db
-from backend.orchestrator.flow import process_message as v3_process_message
-from backend.orchestrator.models import GraphStatus
-from backend.integrations.security import api_limiter, sanitize_input, validate_otp_input
-from backend.integrations.schemes import discover_schemes
-from backend.services.session_store import (
+from backend.agents.pipeline import process_message as v3_process_message
+from backend.agents.schema import GraphStatus
+from backend.security import api_limiter, sanitize_input, validate_otp_input
+from backend.schemes import discover_schemes
+from backend.session_store import (
     get_chat_session,
     save_chat_session,
     save_completed_session,
@@ -181,7 +181,9 @@ def _start_mcp_servers():
                 print(f"[MCP] {name}: no 'mcp' object found in {module}")
                 return
             print(f"[MCP] {name} starting on :{port}")
-            mcp_server.run(transport="streamable-http", host="0.0.0.0", port=port)
+            mcp_server.settings.host = "0.0.0.0"
+            mcp_server.settings.port = port
+            mcp_server.run(transport="sse")
         except Exception as e:
             print(f"[MCP] {name} failed: {e}")
 

@@ -200,16 +200,33 @@ function McpPanel({ servers, open, onClose }: { servers: McpServer[]; open: bool
    ═══════════════════════════════════════════════════════════════ */
 
 export default function AppPage() {
-  const saved = typeof window !== 'undefined' ? (() => { try { return JSON.parse(localStorage.getItem('gs_s') || 'null') } catch { return null } })() : null
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (saved) { const m = loadMessages(saved.uid); if (m?.length) return m }
-    return [INITIAL_MSG]
-  })
+  const [mounted, setMounted] = useState(false)
+  const [messages, setMessages] = useState<Message[]>([INITIAL_MSG])
   const [input, setInput] = useState('')
   const [status, setStatus] = useState<Status>('idle')
-  const [userId] = useState(() => saved?.uid ?? 'u_' + uid())
-  const [phone, setPhone] = useState(saved?.phone ?? '')
-  const [lang, setLang] = useState(saved?.lang ?? 'hi')
+  const [userId, setUserId] = useState('u_' + uid())
+  const [phone, setPhone] = useState('')
+  const [lang, setLang] = useState('hi')
+
+  // Load saved state ONLY on the client after mount
+  useEffect(() => {
+    setMounted(true)
+    const savedRaw = localStorage.getItem('gs_s')
+    if (savedRaw) {
+      try {
+        const saved = JSON.parse(savedRaw)
+        if (saved.uid) setUserId(saved.uid)
+        if (saved.phone) setPhone(saved.phone)
+        if (saved.lang) setLang(saved.lang)
+        
+        const savedMsgs = localStorage.getItem(`gs_c_${saved.uid}`)
+        if (savedMsgs) {
+          const msgs = JSON.parse(savedMsgs)
+          if (msgs.length) setMessages(msgs)
+        }
+      } catch (e) { console.error('Failed to load saved state', e) }
+    }
+  }, [])
   const [langOpen, setLangOpen] = useState(false)
   const [mcpOpen, setMcpOpen] = useState(false)
   const [mcpSrv, setMcpSrv] = useState<McpServer[]>([
@@ -614,7 +631,7 @@ export default function AppPage() {
             <RefreshCw size={12} />
           </button>
           <button onClick={() => setPhoneModal(true)} className="text-[10px] px-2 py-1 rounded-md border opacity-60 hover:opacity-100" style={{ borderColor: '#d4d4d4' }}>
-            {phone ? `+91 ···${phone.slice(-4)}` : '+ Phone'}
+            {mounted && phone ? `+91 ···${phone.slice(-4)}` : '+ Phone'}
           </button>
         </div>
       </header>

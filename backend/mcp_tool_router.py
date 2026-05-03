@@ -44,6 +44,16 @@ class MCPTool:
         )
         return f"  {self.server}.{self.name}({params}) — {self.description}"
 
+    def to_llm_schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": f"{self.server}__{self.name}",
+                "description": self.description,
+                "parameters": self.input_schema
+            }
+        }
+
 
 class MCPToolRouter:
     """
@@ -260,15 +270,4 @@ def _initialize_tools(router: MCPToolRouter):
     from backend.mcp_servers.whatsapp_mcp import mcp as whatsapp_mcp
     router.register_server("whatsapp", whatsapp_mcp)
 
-    # ── Legacy: direct-registered tools that chain multiple MCP calls ──
-
-    async def browser_fill_field(session_id: str, field_label: str, value: str) -> dict:
-        from backend.mcp_servers.browser_mcp import fill_field
-        return await fill_field(session_id, field_label, value)
-
-    async def browser_fill_form(session_id: str, form_data: dict, form_type: str) -> dict:
-        from backend.mcp_servers.browser_mcp import fill_form
-        return await fill_form(session_id, form_data, form_type)
-
-    router.register_direct("browser", "fill_field", "Fill a single form field", browser_fill_field)
-    router.register_direct("browser", "fill_form", "Fill entire form", browser_fill_form)
+    # Legacy tools removed.

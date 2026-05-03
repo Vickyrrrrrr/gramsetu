@@ -361,10 +361,19 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
     if state.get("form_type"): state["next_node"] = "collect_data"; state["current_node"] = "detect_intent"; return state
     prefix = await _llm_respond("Tell user you're about to analyze their request.", {"action": "detect_intent"}, lang, state.get("user_id", ""))
     state["response"] = prefix if prefix else ""
+    # Use history if current message is just a number or very short
+    context_text = text
+    if len(text) < 15 and state.get("conversation_history"):
+        # Combine last few messages for better context
+        recent = [m.get("text", "") for m in state["conversation_history"][-3:] if m.get("role") == "user"]
+        if recent:
+            context_text = " ".join(recent) + " " + text
+            print(f"[Intent] Enhanced context for small message: {context_text[:100]}...")
+
     detected = None
     try:
         from backend.llm_client import chat_intent
-        result = await chat_intent([{"role": "system", "content": "Classify user intent. Return ONLY: {\"intent\": \"<form_name_or_query_type>\", \"confidence\": 0.95}. If form → snake_case name. If scheme query → \"scheme_suggest\". If greeting → \"help\". If user chooses government/non-government → \"form_type_selection\". If unknown → \"unknown\"."}, {"role": "user", "content": text}], temperature=0.0, max_tokens=80)
+        result = await chat_intent([{"role": "system", "content": "Classify user intent. Return ONLY: {\"intent\": \"<form_name_or_query_type>\", \"confidence\": 0.95}. If form → snake_case name. If scheme query → \"scheme_suggest\". If greeting → \"help\". If unknown → \"unknown\"."}, {"role": "user", "content": context_text}], temperature=0.0, max_tokens=80)
         if result:
             m = _regex.search(r'\{.*\}', result, _regex.DOTALL)
             if m: parsed = json.loads(m.group(0)); detected = parsed.get("intent", "")
@@ -503,11 +512,11 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
         history_summary = "\n".join(f"{h['role']}: {h['text'][:200]}" for h in history[-10:])
         context_with_history = f"CONVERSATION HISTORY:\n{history_summary}\n\nALREADY COLLECTED DATA: {json.dumps(existing_data, ensure_ascii=False)}\n\nNEW USER MESSAGE: {user_context}"
         try:
-            extraction = await extract_with_llm(context_with_history, form_type)
+            extraction = await extract_with_llm(context_with_history, form_type, required)
             extracted = extraction.get("extracted_data", {})
             if extracted: existing_data.update(extracted); collected_this_round = True
         except: pass
-        state["form_data"] = existing_data; state["confidence_scores"].update({k: 0.7 for k in quick_data})
+        state["form_data"] = existing_data; state["confidence_scores"].update({k: 0.7 for k in extracted if extracted})
 
     missing = [f for f in required if f not in existing_data or not existing_data[f]]
     collect_attempts = state.get("challenge_otp_attempts", 0)
@@ -519,6 +528,17 @@ async def collect_data_node(state: GramSetuState) -> GramSetuState:
     if missing and is_govt_form:
         # Show what was auto-filled AND what's still needed
         filled_fields = [f.replace("_", " ").title() for f in required if f in existing_data and existing_data[f]]
+        
+        # Enhanced transparency response
+        filled_text = f"I've successfully collected: {', '.join(filled_fields)}." if filled_fields else ""
+        missing_text = f"I still need your {', '.join([f.replace('_', ' ').title() for f in missing[:3]])} to continue."
+        
+        prompt_ctx = f"{filled_text}\n{missing_text}\nAsk the user for the missing fields naturally."
+        state["response"] = await _llm_respond(prompt_ctx, {"missing": missing}, lang, state.get("user_id", ""))
+        state["next_node"] = "collect_data"
+        state["status"] = GraphStatus.WAIT_USER.value
+        state["current_node"] = "collect_data"
+        return state
         missing_labels = [f.replace("_", " ").title() for f in missing[:6]]; state["missing_fields"] = missing
         state["response"] = await _llm_respond(
             f"Tell user what was auto-filled from their data and what's still needed. "
@@ -594,101 +614,35 @@ async def _check_field(router, field_name, value, form_type):
 
 
 async def fill_form_node(state: GramSetuState) -> GramSetuState:
-    start = time.time(); form_type = state.get("form_type", ""); form_data = state.get("form_data", {}); lang = state.get("language", "hi")
-    session_id = state.get("session_id", ""); user_id = state.get("user_id", "")
+    import time
+    from backend.agents.react_agent import run_react_loop
+    from backend.agents.schema import GraphStatus
+    import json
+    
+    start = time.time()
+    form_type = state.get("form_type", "")
+    form_data = state.get("form_data", {})
+    session_id = state.get("session_id", "")
+    user_id = state.get("user_id", "")
+    lang = state.get("language", "hi")
+    
     await _broadcast_progress(session_id, PROGRESS_STEPS[5], 0.65, [{"id": 1, "label": "Verify Identity", "done": True}, {"id": 2, "label": "Understand Request", "done": True}, {"id": 3, "label": "Collect Information", "done": True}, {"id": 4, "label": "Validate Data", "done": True}, {"id": 5, "label": "Fill Portal", "done": False, "active": True}, {"id": 6, "label": "Submit & Receipt", "done": False}], user_id)
-    if state.get("otp_value"):
-        ref = "GS" + _hs.md5(f"{form_type}{time.time()}".encode()).hexdigest()[:10].upper()
-        from backend.generate_pdf import generate_and_encode
-        try: state["pdf_base64"] = generate_and_encode(form_type, form_data, ref, state.get("user_phone", ""))
-        except Exception as e: print(f"[PDF] Generation failed: {e}")
-        if state.get("voice_mode"):
-            fields_summary = ", ".join(f"{k.replace('_', ' ')}: {v}" for k, v in list(form_data.items())[:6] if v and not isinstance(v, dict))
-            state["voice_summary"] = f"Your {form_type.replace('_',' ').title()} application is submitted. Reference: {ref}. {fields_summary}"
-        state["response"] = await _llm_respond(f"Tell user their {form_type.replace('_', ' ').title()} application is submitted successfully. Reference: {ref}. PDF receipt ready.", {"form_type": form_type, "reference": ref, "fields_count": len(form_data)}, lang, user_id)
-        state["status"] = GraphStatus.COMPLETED.value; state["receipt_ready"] = True; state["reference_number"] = ref
-        state["otp_value"] = ""; state["screenshot_b64"] = ""; state["current_node"] = "fill_form"; state["next_node"] = ""
-        await _broadcast_progress(session_id, PROGRESS_STEPS[7], 1.0, [{"id": idx, "label": "", "done": True} for idx in range(1, 9)], user_id)
-        return state
-    if not state.get("consent_confirmed"):
-        user_id_val = state.get("user_id", "")
-        from backend.secure_enclave import is_pin_set
-        if not is_pin_set(user_id_val):
-            state["response"] = await _llm_respond("Ask user to set a security PIN before filling forms.", {}, lang, user_id_val)
-            state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "fill_form"; state["current_node"] = "fill_form"; return state
-        if not state.get("challenge_otp", "").startswith("pin_"):
-            state["challenge_otp"] = "pin_required"
-            state["response"] = await _llm_respond("Ask user to enter their 4-digit PIN to confirm form submission.", {}, lang, user_id_val)
-            state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "fill_form"; state["current_node"] = "fill_form"; return state
-        state["response"] = await _llm_respond("Ask user to type I CONFIRM to verify they are filling this form for themselves.", {}, lang, user_id_val)
-        state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "fill_form"; state["current_node"] = "fill_form"; return state
-    from backend.mcp_tool_router import get_router; router = get_router()
-    from backend.agents.portal_registry import get_portal_info, resolve_portal_url, is_known_form
-    portal_info = get_portal_info(form_type); portal_url = portal_info["url"]
-    if not portal_url and not is_known_form(form_type): portal_url = await resolve_portal_url(form_type, lang)
-    if not portal_url:
-        state["response"] = await _llm_respond(f"Couldn't find portal URL for {form_type}. Ask user to send the website URL.", {"form_type": form_type}, lang, user_id)
-        state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "fill_form"; state["current_node"] = "fill_form"; return state
-    state["portal_url"] = portal_url
-    fill_result = await router.execute("browser", "navigate_and_fill", session_id=session_id, portal_url=portal_url, form_data=form_data, form_type=form_type)
-    fields_filled = fill_result.get("fields_filled", 0); otp_detected = fill_result.get("otp_detected", False)
-    if fill_result.get("error") and not fill_result.get("fields_filled"):
-        print("[FillForm] Retrying field-by-field...")
-        for field, value in form_data.items():
-            if isinstance(value, dict) or not value: continue
-            try: await router.execute("browser", "fill_field", session_id=session_id, field_label=field.replace("_", " ").title(), value=str(value))
-            except: pass
-        fill_result = await router.execute("browser", "fill_form", session_id=session_id, form_data=form_data, form_type=form_type)
-        fields_filled = fill_result.get("fields_filled", 0); otp_detected = fill_result.get("otp_detected", False)
-    login_detected = fill_result.get("login_detected", False)
-    login_type = fill_result.get("login_type", "")
-    file_uploads_detected = fill_result.get("file_upload_detected", False)
-    manual_uploads = fill_result.get("manual_uploads", [])
-
-    # ── Handle login page detection ──────────────────────
-    if login_detected:
-        if login_type == "otp":
-            state["response"] = await _llm_respond(
-                "Portal requires OTP login. Tell user we're handling Aadhaar OTP login and to share the OTP when received.",
-                {"login_type": "otp", "form_type": form_type}, lang, user_id
-            )
-            state["status"] = GraphStatus.WAIT_OTP.value; state["next_node"] = "fill_form"
-        elif login_type in ("oauth", "password", "unknown"):
-            portal_url = state.get("portal_url", "the portal")
-            state["response"] = await _llm_respond(
-                f"Portal at {portal_url} requires manual login ({login_type}). "
-                f"Tell user they need to log in themselves. For OAuth portals (Google/Facebook), "
-                f"explain that GramSetu's remote browser can be opened for them to authenticate. "
-                f"Ask user to reply 'open browser' to get the remote access link.",
-                {"login_type": login_type, "portal_url": portal_url}, lang, user_id
-            )
-            state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "fill_form"
-        state["current_node"] = "fill_form"
-        state.setdefault("audit_entries", []).append({"agent": "form_filler", "node": "fill_form", "action": "login_detected", "output": f"login_type={login_type}", "latency_ms": round((time.time() - start) * 1000, 1)})
-        return state
-
-    if fill_result.get("error"):
-        state["response"] = await _llm_respond("Tell user there was a technical issue filling the form. Apologize sincerely, explain briefly what went wrong, and ask them to try again.", {"error": fill_result.get("error", "")}, lang, user_id)
-        state["status"] = GraphStatus.ERROR.value
-    elif otp_detected:
-        state["response"] = await _llm_respond(f"Tell user {fields_filled} fields have been filled. OTP is required. Ask them to send the 6-digit code.", {"fields_filled": fields_filled}, lang, user_id)
-        state["status"] = GraphStatus.WAIT_OTP.value; state["next_node"] = "fill_form"
-    else:
-        state["status"] = GraphStatus.COMPLETED.value
-        msg = f"Tell user the form has been filled. {fields_filled} fields completed."
-        if file_uploads_detected and manual_uploads:
-            upload_names = ", ".join(manual_uploads[:5])
-            msg += f" Also mention that {len(manual_uploads)} items require manual file upload: {upload_names}."
-        state["response"] = await _llm_respond(msg, {"fields_filled": fields_filled}, lang, user_id)
-    if fill_result.get("screenshot_b64"): state["screenshot_b64"] = fill_result["screenshot_b64"]
-    state["current_node"] = "fill_form"; state["browser_launched"] = True
-    state.setdefault("audit_entries", []).append({"agent": "form_filler", "node": "fill_form", "action": "fill_via_mcp", "output": f"{fields_filled} fields, OTP={otp_detected}, login={login_detected}", "latency_ms": round((time.time() - start) * 1000, 1)})
+    
+    user_request = f"Please navigate to the appropriate portal for the {form_type} form and fill it out completely using this data: {json.dumps(form_data, ensure_ascii=False)}"
+    
+    print(f"\n[pipeline.py] Delegating to ReAct Agent for {form_type}")
+    agent_response = await run_react_loop(session_id, user_request, max_steps=15)
+    
+    state["response"] = agent_response
+    state["status"] = GraphStatus.COMPLETED.value
+    state["current_node"] = "fill_form"
+    state["next_node"] = ""
+    
+    await _broadcast_progress(session_id, PROGRESS_STEPS[7], 1.0, [{"id": idx, "label": "", "done": True} for idx in range(1, 9)], user_id)
+    state.setdefault("audit_entries", []).append({"agent": "react_agent", "node": "fill_form", "action": "agent_execution", "output": agent_response[:100], "latency_ms": round((time.time() - start) * 1000, 1)})
+    
     return state
 
-
-# ════════════════════════════════════════════════════════════
-# NODE MAP
-# ════════════════════════════════════════════════════════════
 
 _NODE_MAP: dict[str, Callable] = {
     "transcribe": transcribe_node,
