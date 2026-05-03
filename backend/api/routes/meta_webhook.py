@@ -383,26 +383,35 @@ async def download_meta_media(media_id: str) -> str:
     if not META_ACCESS_TOKEN:
         return ""
     try:
+        print(f"[Meta] Downloading media: {media_id}")
         async with httpx.AsyncClient(timeout=20.0) as client:
             url_resp = await client.get(
                 f"https://graph.facebook.com/{META_API_VERSION}/{media_id}",
                 headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
             )
             if url_resp.status_code != 200:
+                print(f"[Meta] Media URL fetch failed: {url_resp.status_code} - {url_resp.text[:200]}")
                 return ""
             media_url = url_resp.json().get("url", "")
             if not media_url:
+                print(f"[Meta] No URL in response for media_id={media_id}")
                 return ""
+            print(f"[Meta] Downloading from URL: {media_url[:60]}...")
 
             dl_resp = await client.get(
                 media_url,
                 headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"},
             )
             if dl_resp.status_code != 200:
+                print(f"[Meta] Media download failed: {dl_resp.status_code}")
                 return ""
-            return base64.b64encode(dl_resp.content).decode()
+            result = base64.b64encode(dl_resp.content).decode()
+            print(f"[Meta] Media downloaded successfully: {len(result)} chars base64 ({len(dl_resp.content)} bytes)")
+            return result
     except Exception as e:
         print(f"[Meta] Media download failed: {e}")
+        import traceback
+        traceback.print_exc()
         return ""
 
 

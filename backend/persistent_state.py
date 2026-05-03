@@ -25,19 +25,22 @@ def _get_client():
 def set_state(namespace: str, key: str, value: dict, ttl_seconds: Optional[int] = None) -> bool:
     """Store a value. Optionally auto-expire after ttl_seconds."""
     try:
+        print(f"[State] set_state: namespace={namespace}, key={key[:50]}")
         client = _get_client()
         expires = (time.time() + ttl_seconds) if ttl_seconds else None
         
-        # Supabase upsert requires primary keys to match
         client.table("kv_store").upsert({
             "namespace": namespace,
             "key": key,
             "value": value,
             "expires_at": expires
         }).execute()
+        print(f"[State] set_state SUCCESS: {namespace}/{key[:50]}")
         return True
     except Exception as e:
-        print(f"[State] set_state error: {e}")
+        print(f"[State] set_state FAILED: namespace={namespace}, key={key[:50]}, error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def get_state(namespace: str, key: str) -> Optional[dict]:
@@ -94,15 +97,15 @@ def delete_state(namespace: str, key: str) -> bool:
         print(f"[State] delete_state error: {e}")
         return False
 
-def increment_counter(namespace: str, key: str, ttl_seconds: int = 60) -> int:
+def increment_counter(namespace: str, key: str, increment_by: int = 1, ttl_seconds: Optional[int] = None) -> int:
     """
     Counter increment. Returns new count.
-    Used for rate limiting.
+    Used for impact tracking or rate limiting.
     """
     try:
         current = get_state(namespace, key)
         count = current.get("count", 0) if current else 0
-        new_count = count + 1
+        new_count = count + increment_by
         set_state(namespace, key, {"count": new_count}, ttl_seconds)
         return new_count
     except Exception:

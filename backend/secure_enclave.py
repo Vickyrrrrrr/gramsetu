@@ -60,13 +60,23 @@ def is_locked(user_id: str) -> tuple[bool, str]:
 
 
 def store_selfie_hash(user_id: str, image_b64: str) -> bool:
+    print(f"[Selfie] store_selfie_hash called for user={user_id}")
+    print(f"[Selfie] image_b64 length: {len(image_b64) if image_b64 else 0}")
     if not image_b64 or len(image_b64) < 500:
+        print(f"[Selfie] FAILED: image_b64 too small or empty (len={len(image_b64) if image_b64 else 0})")
         return False
     try:
         img_bytes = base64.b64decode(image_b64)
+        print(f"[Selfie] Decoded image bytes: {len(img_bytes)} bytes")
         _hash = hashlib.sha256(img_bytes[:2048]).hexdigest()
-        return _store_selfie(user_id, _hash)
-    except Exception:
+        print(f"[Selfie] Hash computed: {_hash[:16]}...")
+        result = _store_selfie(user_id, _hash)
+        print(f"[Selfie] _store_selfie result: {result}")
+        return result
+    except Exception as e:
+        print(f"[Selfie] FAILED: Exception: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 

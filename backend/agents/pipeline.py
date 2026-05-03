@@ -217,6 +217,8 @@ async def security_enroll_node(state: GramSetuState) -> GramSetuState:
     user_id = state.get("user_id", ""); lang = state.get("language", "hi")
     text = (state.get("transcribed_text", "") or state.get("raw_message", "")).strip()
     msg_type = state.get("message_type", "text")
+    print(f"[Selfie] security_enroll_node: user={user_id}, msg_type={msg_type}, text_len={len(text)}")
+    print(f"[Selfie] text_preview: {text[:80]}...")
     from backend.secure_enclave import has_security_enrolled, is_pin_set, set_pin, store_selfie_hash
     if has_security_enrolled(user_id): state["next_node"] = "detect_intent"; state["current_node"] = "security_enroll"; return state
     if not is_pin_set(user_id):
@@ -230,6 +232,7 @@ async def security_enroll_node(state: GramSetuState) -> GramSetuState:
             state["status"] = GraphStatus.WAIT_USER.value; state["next_node"] = "security_enroll"
         state["current_node"] = "security_enroll"; return state
     if msg_type == "image" and text and len(text) > 500:
+        print(f"[Selfie] Image detected, calling store_selfie_hash...")
         if store_selfie_hash(user_id, text):
             state["response"] = await _llm_respond("Selfie received. Security setup complete. Ask user what form they need.", {"selfie_ok": True}, lang, user_id)
             state["next_node"] = "detect_intent"; state["status"] = GraphStatus.ACTIVE.value
