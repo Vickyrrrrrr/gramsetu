@@ -13,7 +13,7 @@ router = APIRouter(tags=["voice"])
 async def voice_transcribe(audio: UploadFile = File(...)):
     """Transcribe uploaded audio and return text."""
     print(f"[DEBUG] Received file: {audio.filename}, content_type: {audio.content_type}")
-    if not audio.content_type or not audio.content_type.startswith("audio/"):
+    if not audio.content_type or not (audio.content_type.startswith("audio/") or audio.content_type.startswith("video/") or audio.content_type == "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Invalid audio file")
 
     suffix = os.path.splitext(audio.filename or "recording.webm")[1] or ".webm"

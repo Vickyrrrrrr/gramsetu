@@ -246,12 +246,12 @@ async def security_enroll_node(state: GramSetuState) -> GramSetuState:
 
 
 async def voice_mode_node(state: GramSetuState) -> GramSetuState:
-    if state.get("message_type") == "voice":
-        state["voice_mode"] = True
+    # Strictly follow the current message type
+    state["voice_mode"] = (state.get("message_type") == "voice")
+    if state["voice_mode"]:
         from lib.language_utils import detect_language
         state["voice_language"] = detect_language(state.get("transcribed_text", "")) or "hi"
         state["language"] = state["voice_language"]
-    else: state["voice_mode"] = False
     state["next_node"] = "detect_intent"; state["current_node"] = "voice_mode"; return state
 
 
@@ -867,6 +867,10 @@ async def process_message(
             existing_state["raw_message"] = text
             existing_state["transcribed_text"] = text
             existing_state["message_type"] = message_type
+            existing_state["voice_mode"] = (message_type == "voice")
+            if message_type == "text":
+                from lib.language_utils import detect_language
+                existing_state["language"] = detect_language(text) or "hi"
             existing_state["status"] = GraphStatus.ACTIVE.value
             existing_state["last_active"] = time.time()
             result = await _run_pipeline(existing_state, _save)
@@ -885,7 +889,7 @@ async def process_message(
         "otp_value": "", "identity_verified": False,
         "challenge_otp": "", "challenge_otp_attempts": 0,
         "consent_confirmed": False,
-        "voice_mode": False, "voice_language": "hi", "voice_summary": "",
+        "voice_mode": message_type == "voice", "voice_language": lang, "voice_summary": "",
         "browser_launched": False, "portal_url": "",
         "screenshot_b64": "", "audit_entries": [], "pii_accessed": [],
         "last_active": time.time(), "receipt_ready": False,

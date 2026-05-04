@@ -205,12 +205,13 @@ async def voice_input(request: Request):
     if not api_limiter.is_allowed(client_ip):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
     content_type = request.headers.get("content-type", "")
+    print(f"[DEBUG] /api/voice Content-Type: {content_type}")
     lang = "hi"
     if "multipart/form-data" in content_type:
         form = await request.form()
         audio_file = form.get("audio")
-        if not isinstance(audio_file, UploadFile):
-            raise HTTPException(status_code=400, detail="'audio' field required")
+        if not hasattr(audio_file, "filename"):
+            raise HTTPException(status_code=400, detail="'audio' field required (must be a file)")
         audio_bytes = await audio_file.read()
         lang = form.get("language", "hi")
     else:
@@ -242,86 +243,7 @@ async def voice_input(request: Request):
     return JSONResponse({"text": text, "language_detected": detect_language(text), "confidence": 0.85})
 
 
-# ── Realtime Voice API (WebSocket) ─────────────────
-@app.websocket("/api/voice/realtime")
-async def websocket_realtime_voice(websocket: WebSocket):
-    """Realtime STT via Sarvam WebSocket API."""
-    await websocket.accept()
-    
-    import os
-    SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
-    
-    if not SARVAM_API_KEY or SARVAM_API_KEY == "your_sarvam_key_here":
-        await websocket.send_json({"type": "error", "message": "Sarvam API key not configured"})
-        await websocket.close()
-        return
-    
-    try:
-        import websockets
-        import json
-        
-        sarvam_ws = await websockets.connect(
-            "wss://api.sarvam.ai/speech-to-text-realtime",
-            extra_headers={"api-subscription-key": SARVAM_API_KEY}
-        )
-        
-        # Handle start message
-        start_msg = await websocket.receive_json()
-        language = start_msg.get("language", "hi")
-        
-        # Send config to Sarvam
-        await sarvam_ws.send(json.dumps({
-            "type": "config",
-            "language_code": f"{language}-IN",
-            "model": "saaras:v3",
-            "audio_format": "pcm",
-            "sample_rate": 16000
-        }))
-        
-        async def receive_from_client():
-            try:
-                while True:
-                    try:
-                        data = await asyncio.wait_for(websocket.receive(), timeout=0.1)
-                        if "bytes" in data and data["bytes"]:
-                            await sarvam_ws.send(data["bytes"])
-                        elif "text" in data:
-                            msg = json.loads(data["text"])
-                            if msg.get("type") == "stop":
-                                break
-                    except asyncio.TimeoutError:
-                        continue
-            except Exception:
-                pass
-            finally:
-                await sarvam_ws.close()
-        
-        async def receive_from_sarvam():
-            try:
-                async for message in sarvam_ws:
-                    if isinstance(message, str):
-                        data = json.loads(message)
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "text": data.get("transcript", ""),
-                            "is_final": data.get("is_final", False)
-                        })
-            except Exception as e:
-                print(f"[Realtime STT] Sarvam error: {e}")
-        
-        await asyncio.gather(receive_from_client(), receive_from_sarvam(), return_exceptions=True)
-        
-    except Exception as e:
-        print(f"[Realtime STT] Error: {e}")
-        try:
-            await websocket.send_json({"type": "error", "message": str(e)})
-        except:
-            pass
-    finally:
-        try:
-            await websocket.close()
-        except:
-            pass
+
 
 # ── Voice Output (TTS) ──────────────────────────────────
 @app.post("/api/tts")
