@@ -1,71 +1,249 @@
-@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --cream:  #F7F6F3;
-  --ink:    #0C0C0C;
-  --muted:  #6B6B6B;
-  --border: #E5E5E0;
-  --tan:    #E8D9C0;
+  --canvas: #f5f5f5;
+  --canvas-soft: #fafafa;
+  --canvas-deep: #0c0a09;
+  --ink: #0c0a09;
+  --primary: #292524;
+  --primary-active: #0c0a09;
+  --body: #4e4e4e;
+  --body-strong: #292524;
+  --muted: #777169;
+  --muted-soft: #a8a29e;
+  --on-primary: #ffffff;
+  --on-dark: #ffffff;
+  --on-dark-soft: #a8a29e;
+  --hairline: #e7e5e4;
+  --hairline-soft: #f0efed;
+  --hairline-strong: #d6d3d1;
+  --surface-card: #ffffff;
+  --surface-strong: #f0efed;
+  --surface-dark: #0c0a09;
+  --surface-dark-elevated: #1c1917;
+  --gradient-mint: #a7e5d3;
+  --gradient-peach: #f4c5a8;
+  --gradient-lavender: #c8b8e0;
+  --gradient-sky: #a8c8e8;
+  --gradient-rose: #e8b8c4;
+  --success: #16a34a;
+  --error: #dc2626;
 }
 
 html {
-  background: var(--cream);
+  background: var(--canvas);
   color: var(--ink);
-  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
-  background: var(--cream);
+  background: var(--canvas);
   min-height: 100vh;
 }
 
-/* -- Scroll */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+::selection {
+  background: var(--hairline-strong);
+  color: var(--ink);
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+::-webkit-scrollbar-thumb { background: var(--hairline-strong); border-radius: 99px; }
 
-/* -- Thin selection */
-::selection { background: var(--tan); color: var(--ink); }
-
-/* -- Utilities */
-.serif { font-family: 'Instrument Serif', Georgia, serif; }
-.ink { color: var(--ink); }
-.muted { color: var(--muted); }
-
-/* -- Card */
-.card {
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+/* ── Utility Classes ──────────────────────────────────── */
+.display {
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-weight: 300;
 }
 
-/* -- Message bubble helpers */
-.msg-user {
-  background: var(--ink);
-  color: white;
-  border-radius: 18px 18px 4px 18px;
-}
-.msg-ai {
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: 18px 18px 18px 4px;
+/* ── Gradient Orbs ────────────────────────────────────── */
+@layer components {
+  .gradient-orb {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.35;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .gradient-orb-mint { background: radial-gradient(circle, var(--gradient-mint) 0%, transparent 70%); }
+  .gradient-orb-peach { background: radial-gradient(circle, var(--gradient-peach) 0%, transparent 70%); }
+  .gradient-orb-lavender { background: radial-gradient(circle, var(--gradient-lavender) 0%, transparent 70%); }
+  .gradient-orb-sky { background: radial-gradient(circle, var(--gradient-sky) 0%, transparent 70%); }
+  .gradient-orb-rose { background: radial-gradient(circle, var(--gradient-rose) 0%, transparent 70%); }
 }
 
-/* -- Smooth fade-in for bubbles */
+/* ── Button Styles ────────────────────────────────────── */
+@layer components {
+  .btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--primary);
+    color: var(--on-primary);
+    border: none;
+    border-radius: 9999px;
+    padding: 10px 20px;
+    height: 40px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s ease;
+  }
+  .btn-primary:hover { background: var(--primary-active); }
+
+  .btn-outline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 9999px;
+    padding: 10px 20px;
+    height: 40px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+  .btn-outline:hover { border-color: var(--ink); }
+
+  .btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    color: var(--ink);
+    border: none;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s ease;
+  }
+  .btn-ghost:hover { opacity: 0.7; }
+}
+
+/* ── Card Styles ──────────────────────────────────────── */
+@layer components {
+  .feature-card {
+    background: var(--surface-card);
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    padding: 24px;
+  }
+
+  .feature-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  }
+}
+
+/* ── Message Bubbles (Chat) ───────────────────────────── */
+@layer components {
+  .msg-user {
+    background: var(--primary);
+    color: var(--on-primary);
+    border-radius: 16px 16px 4px 16px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    letter-spacing: 0.15px;
+  }
+
+  .msg-assistant {
+    background: var(--surface-card);
+    border: 1px solid var(--hairline);
+    border-radius: 16px 16px 16px 4px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    letter-spacing: 0.15px;
+  }
+
+  .msg-system {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.96px;
+    text-transform: uppercase;
+  }
+}
+
+/* ── Input Styles ─────────────────────────────────────── */
+@layer components {
+  .input-editorial {
+    background: var(--surface-card);
+    color: var(--ink);
+    border: 1px solid var(--hairline-strong);
+    border-radius: 8px;
+    padding: 12px 16px;
+    height: 44px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    letter-spacing: 0.15px;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .input-editorial:focus {
+    border-color: var(--ink);
+    border-width: 2px;
+    padding: 11px 15px;
+  }
+}
+
+/* ── Badge ────────────────────────────────────────────── */
+@layer components {
+  .badge-pill {
+    display: inline-flex;
+    align-items: center;
+    background: var(--surface-strong);
+    color: var(--ink);
+    border-radius: 9999px;
+    padding: 4px 10px;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: 0.96px;
+    text-transform: uppercase;
+  }
+}
+
+/* ── Animations ───────────────────────────────────────── */
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.fade-up { animation: fadeUp 0.25s ease both; }
+.fade-up { animation: fadeUp 0.4s ease both; }
 
-/* -- Typing dots */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes orbDrift {
+  0%   { transform: translate(0, 0) scale(1); }
+  25%  { transform: translate(20px, -10px) scale(1.02); }
+  50%  { transform: translate(-10px, 15px) scale(0.98); }
+  75%  { transform: translate(-15px, -5px) scale(1.01); }
+  100% { transform: translate(0, 0) scale(1); }
+}
+
 @keyframes dot {
-  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  0%, 80%, 100% { transform: scale(0.5); opacity: 0.3; }
   40%            { transform: scale(1);   opacity: 1; }
 }
 .typing-dot { animation: dot 1.2s infinite; }

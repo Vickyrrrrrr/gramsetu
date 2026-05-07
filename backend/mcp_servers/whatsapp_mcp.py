@@ -17,6 +17,8 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu WhatsApp Bridge")
+mcp.app = mcp.sse_app()
+
 
 # ── Config ─────────────────────────────────────────────────
 META_ACCESS_TOKEN = os.getenv("META_ACCESS_TOKEN", "")

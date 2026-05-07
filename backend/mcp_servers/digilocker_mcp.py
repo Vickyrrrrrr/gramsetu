@@ -15,6 +15,8 @@ import json
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu DigiLocker Server")
+mcp.app = mcp.sse_app()
+
 
 # ── In-memory user data store (production: real DigiLocker API) ─
 # Users can register their data through the web app vault or chat

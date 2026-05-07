@@ -22,6 +22,8 @@ import time as _time
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu Browser Server")
+mcp.app = mcp.sse_app()
+
 
 
 # ── Browser session management ─────────────────────────────

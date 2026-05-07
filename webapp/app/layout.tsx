@@ -22,14 +22,11 @@ export default function RootLayout({
       <head>
         <link
           rel="stylesheet"
-          href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@300;400;500;600&display=swap"
         />
-        <link
-          rel="stylesheet"
-          href="https://fonts.cdnfonts.com/css/geist"
-        />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏛️</text></svg>" />
       </head>
-      <body className="bg-cream text-ink antialiased">{children}</body>
+      <body className="bg-canvas text-ink antialiased">{children}</body>
     </html>
   )
 }

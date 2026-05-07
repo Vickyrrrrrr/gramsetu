@@ -15,6 +15,10 @@ from datetime import datetime, timezone
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("GramSetu Audit Server")
+mcp.app = mcp.sse_app()
+
+_audit_log = []
+
 
 # ── PII patterns ───────────────────────────────────────────
 _AADHAAR_RE = re.compile(r'\b[2-9]\d{3}[\s\-]?\d{4}[\s\-]?\d{4}\b')
@@ -30,12 +34,6 @@ def _redact_text(text: str) -> str:
 
     text = _AADHAAR_RE.sub(lambda m: f"XXXX-XXXX-{m.group()[-4:]}", text)
     text = _PAN_RE.sub(r"XXXXX\2\3", text)
-    text = _PHONE_RE.sub(lambda m: f"XXXXXX{str(m.group())[-4:]}", text)
-    text = _EMAIL_RE.sub(lambda m: f"***@{m.group().split('@')[1] if '@' in m.group() else '***'}", text)
-    return text
-
-    text = _AADHAAR_RE.sub(lambda m: f"XXXX-XXXX-{m.group()[-4:]}", text)
-    text = _PAN_RE.sub(lambda m: f"{m.group()[:3]}XXX{m.group()[-3:]}", text)
     text = _PHONE_RE.sub(lambda m: f"XXXXXX{str(m.group())[-4:]}", text)
     text = _EMAIL_RE.sub(lambda m: f"***@{m.group().split('@')[1] if '@' in m.group() else '***'}", text)
     return text

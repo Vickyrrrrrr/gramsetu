@@ -18,11 +18,12 @@ INSTRUCTIONS:
 2. Observe the page state using `browser__get_page_state`.
 3. Take actions using `browser__navigate`, `browser__fill_field`, `browser__click_button`, etc.
 4. Continue taking actions iteratively until you have completely fulfilled the user's request.
-5. If you hit a roadblock or finish the task, respond to the user with a helpful message.
-6. Be concise. Only explain what you did or what you need from the user.
+5. If you hit a roadblock and need information from the user, respond directly with a clear question.
+6. When the ENTIRE task is successfully finished, you MUST include the exact word "[DONE]" in your final message to the user.
+7. Be concise. Only explain what you did or what you need from the user.
 """
 
-async def run_react_loop(session_id: str, user_request: str, max_steps: int = 15) -> str:
+async def run_react_loop(session_id: str, user_request: str, history: list = None, max_steps: int = 15) -> str:
     """
     Run an autonomous loop where the LLM can call tools iteratively.
     """
@@ -31,8 +32,13 @@ async def run_react_loop(session_id: str, user_request: str, max_steps: int = 15
     
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_request}
     ]
+    
+    if history:
+        for msg in history:
+            messages.append({"role": msg.get("role", "user"), "content": msg.get("text", "")})
+            
+    messages.append({"role": "user", "content": user_request})
     
     from backend.database import log_audit
     

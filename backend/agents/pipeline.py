@@ -373,16 +373,26 @@ async def detect_intent_node(state: GramSetuState) -> GramSetuState:
     detected = None
     try:
         from backend.llm_client import chat_intent
-        result = await chat_intent([{"role": "system", "content": "Classify user intent. Return ONLY: {\"intent\": \"<form_name_or_query_type>\", \"confidence\": 0.95}. If form → snake_case name. If scheme query → \"scheme_suggest\". If greeting → \"help\". If unknown → \"unknown\"."}, {"role": "user", "content": context_text}], temperature=0.0, max_tokens=80)
+        result = await chat_intent([{"role": "system", "content": "Classify user intent. Return ONLY: {\"intent\": \"<form_name_or_query_type>\", \"confidence\": 0.95}. If form → snake_case name. If user just says 'government form' or 'non-government form', return \"form_type_selection\". If scheme query → \"scheme_suggest\". If greeting → \"help\". If unknown → \"unknown\"."}, {"role": "user", "content": context_text}], temperature=0.0, max_tokens=80)
         if result:
             m = _regex.search(r'\{.*\}', result, _regex.DOTALL)
             if m: parsed = json.loads(m.group(0)); detected = parsed.get("intent", "")
     except: pass
     if not detected or detected == "unknown":
         lower = text.lower()
-        for kw, intent in {"ration": "ration_card", "pension": "pension", "pan": "pan_card", "voter": "voter_id", "kisan": "pm_kisan", "ayushman": "ayushman_bharat", "mnrega": "mnrega", "jandhan": "jan_dhan", "birth": "birth_certificate", "caste": "caste_certificate", "kcc": "kisan_credit_card", "scheme": "scheme_suggest", "yojana": "scheme_suggest", "form": "generic", "apply": "generic"}.items():
-            if kw in lower: detected = intent; break
-    if detected and detected not in ("scheme_suggest", "help", "unknown", "form_type_selection"): state["form_type"] = detected; state["next_node"] = "collect_data"; state["status"] = GraphStatus.ACTIVE.value
+        if "non-government form" in lower or "non government form" in lower or "government form" in lower:
+            detected = "form_type_selection"
+        else:
+            for kw, intent in {"ration": "ration_card", "pension": "pension", "pan": "pan_card", "voter": "voter_id", "kisan": "pm_kisan", "ayushman": "ayushman_bharat", "mnrega": "mnrega", "jandhan": "jan_dhan", "birth": "birth_certificate", "caste": "caste_certificate", "kcc": "kisan_credit_card", "scheme": "scheme_suggest", "yojana": "scheme_suggest", "form": "generic", "apply": "generic"}.items():
+                if kw in lower: detected = intent; break
+    if detected and detected not in ("scheme_suggest", "help", "unknown", "form_type_selection"):
+        from backend.agents.portal_registry import is_known_form
+        state["form_type"] = detected
+        state["status"] = GraphStatus.ACTIVE.value
+        if is_known_form(detected):
+            state["next_node"] = "collect_data"
+        else:
+            state["next_node"] = "fill_form"
     elif detected == "scheme_suggest":
         try:
             from backend.schemes import discover_from_message; result = await discover_from_message(text, lang)
@@ -628,17 +638,39 @@ async def fill_form_node(state: GramSetuState) -> GramSetuState:
     
     await _broadcast_progress(session_id, PROGRESS_STEPS[5], 0.65, [{"id": 1, "label": "Verify Identity", "done": True}, {"id": 2, "label": "Understand Request", "done": True}, {"id": 3, "label": "Collect Information", "done": True}, {"id": 4, "label": "Validate Data", "done": True}, {"id": 5, "label": "Fill Portal", "done": False, "active": True}, {"id": 6, "label": "Submit & Receipt", "done": False}], user_id)
     
-    user_request = f"Please navigate to the appropriate portal for the {form_type} form and fill it out completely using this data: {json.dumps(form_data, ensure_ascii=False)}"
+    history = state.get("conversation_history", [])
+    text = state.get("transcribed_text", "")
+    
+    # Append the user's latest message if it's not already the last one in history
+    if text and (not history or history[-1].get("text") != text):
+        history.append({"role": "user", "text": text})
+        state["conversation_history"] = history
+    
+    # If the user already provided some data in previous nodes, include it in the initial prompt
+    data_str = json.dumps(form_data, ensure_ascii=False) if form_data else "{}"
+    
+    # We don't need to pass user_request if history already contains the conversation,
+    # but we pass a system-like prompt to guide the agent for this specific form type.
+    user_request = f"Please navigate to the appropriate portal for the {form_type} form and fill it out completely using this data if available: {data_str}. Ask me if you need any other fields. The user just said: {text}"
     
     print(f"\n[pipeline.py] Delegating to ReAct Agent for {form_type}")
-    agent_response = await run_react_loop(session_id, user_request, max_steps=15)
+    agent_response = await run_react_loop(session_id, user_request, history, max_steps=15)
     
-    state["response"] = agent_response
-    state["status"] = GraphStatus.COMPLETED.value
-    state["current_node"] = "fill_form"
-    state["next_node"] = ""
+    # Append the agent's response to history
+    history.append({"role": "assistant", "text": agent_response.replace("[DONE]", "").strip()})
+    state["conversation_history"] = history
     
-    await _broadcast_progress(session_id, PROGRESS_STEPS[7], 1.0, [{"id": idx, "label": "", "done": True} for idx in range(1, 9)], user_id)
+    state["response"] = agent_response.replace("[DONE]", "").strip()
+    
+    if "[DONE]" in agent_response:
+        state["status"] = GraphStatus.COMPLETED.value
+        state["current_node"] = "fill_form"
+        state["next_node"] = ""
+        await _broadcast_progress(session_id, PROGRESS_STEPS[7], 1.0, [{"id": idx, "label": "", "done": True} for idx in range(1, 9)], user_id)
+    else:
+        state["status"] = GraphStatus.WAIT_USER.value
+        state["current_node"] = "fill_form"
+        state["next_node"] = "fill_form"
     state.setdefault("audit_entries", []).append({"agent": "react_agent", "node": "fill_form", "action": "agent_execution", "output": agent_response[:100], "latency_ms": round((time.time() - start) * 1000, 1)})
     
     return state
@@ -877,16 +909,19 @@ async def process_message(
             return _format_result(result, session_id)
 
     # FRESH session
+    # Preserve identity if existing state exists and was verified
+    is_verified = existing_state.get("identity_verified", False) if existing_state else False
+    
     initial_state: GramSetuState = {
         "session_id": session_id, "user_id": user_id, "user_phone": user_phone,
         "raw_message": text, "message_type": message_type, "language": lang,
         "transcribed_text": "", "form_type": form_type,
         "form_data": {}, "confidence_scores": {}, "validation_errors": [],
         "missing_fields": [], "_inferred_fields": [], "status": GraphStatus.ACTIVE.value,
-        "current_node": "", "next_node": "transcribe",
+        "current_node": "", "next_node": "detect_intent" if is_verified else "transcribe",
         "response": "", "confirmation_summary": "",
         "conversation_history": [], "last_collected_at": 0,
-        "otp_value": "", "identity_verified": False,
+        "otp_value": "", "identity_verified": is_verified,
         "challenge_otp": "", "challenge_otp_attempts": 0,
         "consent_confirmed": False,
         "voice_mode": message_type == "voice", "voice_language": lang, "voice_summary": "",
